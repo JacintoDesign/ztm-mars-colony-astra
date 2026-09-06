@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <radialGradient id="marsGrad" cx="45%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#ff7b54" />
+      <stop offset="50%" stop-color="#d9381e" />
+      <stop offset="85%" stop-color="#8a1c14" />
+      <stop offset="100%" stop-color="#460d0d" />
+    </radialGradient>
+    <radialGradient id="domeGrad" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#a5f3fc" />
+      <stop offset="40%" stop-color="#38bdf8" />
+      <stop offset="80%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </radialGradient>
+    <linearGradient id="craterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67130e" />
+      <stop offset="100%" stop-color="#b8321d" />
+    </linearGradient>
+    <linearGradient id="baseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#475569" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Mars Planet Sphere -->
+  <circle cx="64" cy="64" r="58" fill="url(#marsGrad)" />
+
+  <!-- Atmosphere / Edge Rim Glow -->
+  <circle cx="64" cy="64" r="58" fill="none" stroke="#ff8c69" stroke-width="2" opacity="0.6" />
+
+  <!-- Craters -->
+  <ellipse cx="34" cy="78" rx="10" ry="7" fill="url(#craterGrad)" opacity="0.75" />
+  <ellipse cx="88" cy="88" rx="14" ry="8" fill="url(#craterGrad)" opacity="0.6" />
+  <ellipse cx="30" cy="46" rx="6" ry="4" fill="url(#craterGrad)" opacity="0.5" />
+  <ellipse cx="94" cy="48" rx="8" ry="5" fill="url(#craterGrad)" opacity="0.55" />
+
+  <!-- Colony Base Platform -->
+  <polygon points="64,28 98,46 98,54 64,72 30,54 30,46" fill="url(#baseGrad)" stroke="#64748b" stroke-width="1.5" />
+
+  <!-- Habitat Module (Small Left Dome) -->
+  <ellipse cx="46" cy="47" rx="11" ry="8" fill="url(#domeGrad)" stroke="#0ea5e9" stroke-width="1" />
+  <path d="M 37 47 Q 46 41 55 47" fill="none" stroke="#e0f2fe" stroke-width="0.75" opacity="0.8" />
+  <path d="M 46 39 Q 46 47 46 55" fill="none" stroke="#e0f2fe" stroke-width="0.75" opacity="0.8" />
+
+  <!-- Habitat Module (Small Right Tech Wing) -->
+  <polygon points="76,46 90,38 92,44 78,52" fill="#334155" stroke="#38bdf8" stroke-width="1" />
+  <circle cx="85" cy="41" r="2" fill="#00f0ff" filter="url(#neonGlow)" />
+
+  <!-- Main Central Bio-Dome -->
+  <ellipse cx="64" cy="42" rx="18" ry="14" fill="url(#domeGrad)" stroke="#38bdf8" stroke-width="1.5" />
+  <!-- Main Dome Geodesic Grid lines -->
+  <path d="M 48 42 Q 64 32 80 42" fill="none" stroke="#e0f2fe" stroke-width="1" opacity="0.8" />
+  <path d="M 51 46 Q 64 37 77 46" fill="none" stroke="#e0f2fe" stroke-width="0.75" opacity="0.7" />
+  <path d="M 64 28 Q 64 42 64 56" fill="none" stroke="#e0f2fe" stroke-width="1" opacity="0.8" />
+  <path d="M 56 31 Q 58 42 54 53" fill="none" stroke="#e0f2fe" stroke-width="0.75" opacity="0.7" />
+  <path d="M 72 31 Q 70 42 74 53" fill="none" stroke="#e0f2fe" stroke-width="0.75" opacity="0.7" />
+
+  <!-- Tech Antenna / Comm Array -->
+  <line x1="72" y1="28" x2="72" y2="18" stroke="#cbd5e1" stroke-width="1.5" />
+  <circle cx="72" cy="17" r="2.5" fill="#ef4444" filter="url(#neonGlow)" />
+  <line x1="72" y1="22" x2="76" y2="20" stroke="#cbd5e1" stroke-width="1" />
+
+  <!-- Solar Array Panels Left -->
+  <polygon points="24,56 34,50 38,55 28,61" fill="#0284c7" stroke="#38bdf8" stroke-width="0.75" />
+  <line x1="29" y1="53" x2="33" y2="58" stroke="#e0f2fe" stroke-width="0.5" />
+
+  <!-- Cyan Power Beacons / Runway lights -->
+  <circle cx="64" cy="66" r="1.5" fill="#00f0ff" filter="url(#neonGlow)" />
+  <circle cx="48" cy="58" r="1.2" fill="#00f0ff" filter="url(#neonGlow)" />
+  <circle cx="80" cy="58" r="1.2" fill="#00f0ff" filter="url(#neonGlow)" />
+</svg>
