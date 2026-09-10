@@ -9,6 +9,7 @@ export interface AuthModalHandlers {
 
 export class AuthModal {
   private container: HTMLElement;
+  private home: HTMLElement;
   private mode: 'signin' | 'signup' = 'signin';
   private handlers: AuthModalHandlers;
 
@@ -18,15 +19,42 @@ export class AuthModal {
     this.container.id = 'auth-modal-overlay';
     this.container.className = 'auth-modal-overlay';
     document.body.appendChild(this.container);
+    this.home = document.createElement('section');
+    this.home.className = 'home-welcome';
+    this.home.innerHTML = `
+      <header class="home-intro">
+        <p class="home-kicker">ARES / SURFACE OPERATIONS</p>
+        <h1>A new frontier.</h1>
+        <p class="home-subtitle">3D Mars Colony Simulation Game</p>
+      </header>
+      <div class="home-enter-box">
+        <h2>ENTER COLONY</h2>
+        <button type="button" id="home-enter-colony">ENTER COLONY →</button>
+      </div>`;
+    document.body.append(this.home);
+    this.home.querySelector('button')!.addEventListener('click', () => this.show());
     this.render();
+    this.showHome();
+  }
+
+  public showHome(): void {
+    this.container.style.display = 'none';
+    document.body.classList.remove('showing-auth');
+    document.body.classList.add('showing-home');
+    this.home.hidden = false;
   }
 
   public show(): void {
+    document.body.classList.remove('showing-home');
+    this.home.hidden = true;
+    document.body.classList.add('showing-auth');
     this.container.style.display = 'flex';
     this.render();
   }
 
   public hide(): void {
+    document.body.classList.remove('showing-auth', 'showing-home');
+    this.home.hidden = true;
     this.container.style.display = 'none';
   }
 

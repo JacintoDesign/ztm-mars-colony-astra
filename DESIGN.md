@@ -21,6 +21,12 @@ spacing:
 
 # Mars Colony Telemetry Design System
 
+## 3D edition
+
+The September 2026 3D edition supersedes the Canvas 2D scene requirements below. Render the world with Three.js WebGL, procedural 3D meshes, physically lit materials and soft world shadows. The existing flat telemetry UI remains. Use deterministic visual terrain elevation with ridges, shallow craters and peripheral rock formations; terrain does not change pathfinding, deposits, buildability or simulation rules. Use terrain raycasting for picking and the shared grid-to-world transform for placement. All seven buildings, colonists, rovers, transport capsules and meteorites use real geometry. Condition and production indicators remain state-driven. Camera navigation alone may update independently of a simulation tick.
+
+The standalone `/model-preview.html` is a read-only visual fixture with no authentication or simulation loop.
+
 ## Overview
 
 Stark, utilitarian Mars mission telemetry — functional readouts, no decoration. The interface adopts a dark-only theme with high contrast against the Martian terrain.
@@ -174,3 +180,6 @@ Worth being clear on why this is a second info panel and not one shared with the
 - DO draw all game elements in code on the 2D Canvas surface; never load external image assets.
 - DON'T use the accent color `#7fd4e0` for danger signals or critical alert borders; use `#D94F3D` for critical and `#E0A030` for warning.
 - DON'T apply border radiuses, box shadows, gradients, or animated transitions.
+### 3D building warning signs
+
+Building faults use screen-projected triangular SVG signs above the model instead of floating cubes. Power-off facilities use a yellow crossed-out lightning bolt; broken facilities use a red exclamation mark. All warning signs remain steady, without flashing or animation. Buried buildings retain their soil cover and show a steady orange exclamation mark. Buried/broken conditions take priority over loss of power.

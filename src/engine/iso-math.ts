@@ -95,3 +95,8 @@ export function sortBackToFront<T extends { x: number; y: number }>(items: reado
     return a.x - b.x;
   });
 }
+
+/** Shared mapping from logical tiles to the 3D X/Z surface; Y is visual elevation. */
+export function gridToWorld(x: number, y: number): { x: number; z: number } {
+  return { x: x + 0.5, z: y + 0.5 };
+}

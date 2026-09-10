@@ -1945,3 +1945,32 @@ body:not(:has(#internal-readout)) .resource-panel {
     box-sizing: border-box;
   }
 }
+
+/* World labels are projected from 3D positions; all interaction stays on canvas. */
+.scene-labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.scene-labels span { position: absolute; transform: translate(-50%, -100%); padding: 4px 7px; background: #211a17e8; border: 1px solid #786451; font: 11px 'Chakra Petch', sans-serif; letter-spacing: 1px; white-space: nowrap; }
+
+.showing-auth .auth-modal-overlay { background: rgba(26,14,8,.15); justify-content: flex-end; }
+.showing-auth #resource-panel, .showing-auth #toolbar, .showing-auth #mission-advisor { visibility: hidden; }
+.model-gallery-link { display: block; margin-top: 14px; color: #d9dde0; font-size: 11px; line-height: 1.6; }
+@media(max-width:900px) { .showing-auth .auth-modal-overlay { justify-content: center; background: rgba(26,14,8,.25); } }
+
+/* Welcome screen uses a decorative colony, shared unchanged with the login backdrop. */
+.showing-home #resource-panel, .showing-home #toolbar, .showing-home #mission-advisor,
+.showing-home #internal-readout, .showing-auth #internal-readout { visibility: hidden; }
+.home-welcome { position: fixed; inset: 0; pointer-events: none; z-index: 100; color: #ded5bf; }
+.home-intro { position: absolute; top: 24px; left: 24px; padding: 20px; border-left: 1px solid #866a52; background: #211a17de; }
+.home-kicker { margin: 0; font: 10px Arial, sans-serif; letter-spacing: 3px; }
+.home-intro h1 { font: 400 44px Arial, sans-serif; letter-spacing: -2px; margin: 14px 0; }
+.home-subtitle { font: 12px Arial, sans-serif; color: #c9b6a3; margin: 0; letter-spacing: 1px; }
+.home-enter-box { position: absolute; left: 24px; bottom: 24px; padding: 24px; background: #211a17eb; border-left: 1px solid #866a52; pointer-events: auto; }
+.home-enter-box h2 { margin: 0 0 16px; font: 11px Arial, sans-serif; letter-spacing: 2px; }
+.home-enter-box button { padding: 13px 22px; background: #30251c; color: #ded5bf; border: 1px solid #866a52; font: 12px Arial, sans-serif; letter-spacing: 2px; cursor: pointer; }
+.home-enter-box button:hover, .home-enter-box button:focus-visible { background: #493525; outline: 1px solid #ded5bf; outline-offset: 3px; }
+.showing-auth .auth-modal-overlay { justify-content: center; background: rgba(26,14,8,.42); }
+@media(max-width:600px) {
+  .home-intro { left: 12px; top: 12px; padding: 16px; }
+  .home-intro h1 { font-size: 34px; }
+  .home-subtitle { font-size: 11px; letter-spacing: 0; }
+  .home-enter-box { left: 12px; bottom: 18px; padding: 18px; }
+}

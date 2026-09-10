@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Mars Colony · 3D model preview</title>
+  </head>
+  <body>
+    <canvas id="preview"></canvas>
+    <header>
+      <span>ARES / SURFACE OPERATIONS</span>
+      <h1>A new frontier.</h1>
+      <p>3D colony study · Olympus survey sector</p>
+    </header>
+    <aside>
+      <b>MODEL PREVIEW</b>
+      <p>
+        All seven facilities in four conditions.<br />Landing ship, colonists and three rover configurations.
+      </p>
+      <p>Scroll to zoom · Drag to pan · Click a facility to identify it</p>
+      <div class="preview-views"><button id="view-all">ALL MODELS &amp; STATES</button><button id="view-ship">LANDING SHIP</button></div>
+      <a href="/">ENTER COLONY →</a>
+    </aside>
+    <div id="selection">READ-ONLY SCENE · NO SIMULATION</div>
+    <script type="module" src="/src/model-preview.ts"></script>
+  </body>
+</html>

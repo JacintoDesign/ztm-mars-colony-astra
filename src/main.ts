@@ -1,4 +1,5 @@
 import './style.css';
+import { homePreviewState as modelPreviewState } from './home-preview-state';
 import { ColonyStore } from './simulation/store';
 import { InternalReadout } from './ui/internal-readout';
 import { Toolbar } from './ui/toolbar';
@@ -165,6 +166,8 @@ const renderer = new IsometricRenderer({
     toolbar.setTool(null);
   },
 });
+
+renderer.setPreviewState(modelPreviewState);
 
 // Initialize Building Inspector Card with contextual facility management & direct power controls
 const buildingInspector = new BuildingInspector({
@@ -402,13 +405,14 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
     activeUserDisplay = 'none';
     isInitializingUserId = null;
     store.setServerActionHandler(null);
+    renderer.setPreviewState(modelPreviewState);
     store.reset();
     renderer.setSelectedTool(null);
     telemetryBanner.setState('hidden');
     toolbar.setActionsPaused(false);
     toolbar.setStatus('Authentication Required', 'warning');
     gameOverModal.hide();
-    authModal.show();
+    authModal.showHome();
     return;
   }
 
@@ -435,6 +439,8 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
 
     // Populate store with authoritative colony state
     store.loadColonyData(colonyData, activeUserDisplay);
+
+    renderer.setPreviewState(null);
 
     // Configure authoritative server action handler for all dispatched player actions
     store.setServerActionHandler(async (action) => {

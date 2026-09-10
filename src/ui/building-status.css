@@ -1,0 +1,7 @@
+/* CSS draws attention only; colony conditions still come exclusively from state. */
+.building-status-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.building-status-badge { position: absolute; width: 32px; height: 32px; transform: translate(-50%, -100%); }
+.building-status-badge svg { display: block; width: 100%; height: 100%; }
+.building-status-unpowered { color: #f0c84b; }
+.building-status-broken { color: #e45b4a; }
+.building-status-buried { color: #eb913c; }

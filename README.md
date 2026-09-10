@@ -1,12 +1,18 @@
-# 🚀 Mars Colony — Isometric Simulation & Life Support Strategy
+# 🚀 Mars Colony — 3D Isometric Simulation & Life Support Strategy
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-6.0+-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![HTML5 Canvas](https://img.shields.io/badge/HTML5-Canvas%202D-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API)
+[![Three.js](https://img.shields.io/badge/Three.js-WebGL-222222?logo=threedotjs&logoColor=white)](https://threejs.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%26%20Edge%20Functions-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
 [![Vercel](https://img.shields.io/badge/Deploy-Vercel-000000?logo=vercel&logoColor=white)](https://vercel.com/)
 
 A real-time, browser-based **isometric colony simulator** set on the surface of Mars. Players establish and sustain an off-world settlement, balancing life support thermodynamics (Oxygen, Power, Food), workforce labor, autonomous rover logistics, surface mining, and environmental hazards against a continuous, deterministic server-side simulation engine.
+
+## 3D edition
+
+The game now uses Three.js with procedural models for every facility, colonists, rovers, supply capsules and meteorites. Raised Martian terrain, crater rims, rock formations, material shading and soft shadows replace the original sprite renderer. Terrain is visual only; simulation and server action rules are unchanged.
+
+Run `npm run dev`, then open `/model-preview.html` for an isolated model showcase (no account or live colony required), or `/` to play. Scroll to zoom, drag to pan, and click buildings to inspect them. The game retains touch pinch and pan controls. A WebGL 2 capable browser is required. `npm run build` includes both pages.
 
 ---
 
@@ -116,7 +122,7 @@ When an arrival touches down at `(0, 0)`, an interactive overhead HUD beacon ren
 
 ### Isometric Mathematics & Render Pipeline
 * **Coordinate Transforms**: Strict 2:1 isometric projection transforms screen $(x, y) \leftrightarrow \text{grid}(u, v)$.
-* **Back-to-Front Depth Sorting**: Structures, colonists, and rovers are sorted dynamically by depth key $(x + y) \times 1000 + z$ to guarantee correct occlusion and visual volume hit-testing.
+* **Depth and Picking**: Buildings are created in back-to-front grid order; the WebGL depth buffer resolves actual mesh occlusion. Raycasting intersects elevated terrain and building meshes for accurate placement and inspection.
 
 ### Authoritative Server & Database Design
 * **Database Isolation**: Tables (`marscolony_colonies`, `marscolony_buildings`, `marscolony_colonists`, `marscolony_rovers`, `marscolony_battery_cells`) enforce Row-Level Security (RLS).
@@ -130,10 +136,11 @@ When an arrival touches down at `(0, 0)`, an interactive overhead HUD beacon ren
 ztm-mars-colony/
 ├── src/
 │   ├── assets/
-│   │   └── building-renderers.ts   # 2D Canvas procedural sprites & animations
+│   │   └── models/colony-models.ts # Shared procedural 3D models and materials
 │   ├── engine/
 │   │   ├── iso-math.ts             # Isometric coordinate projection transforms
-│   │   └── renderer.ts             # Canvas render loop, depth sorting & input handling
+│   │   ├── colony-scene.ts         # WebGL terrain, models, lighting and raycasts
+│   │   └── renderer.ts             # Input handling and state-to-scene integration
 │   ├── services/
 │   │   ├── auth-manager.ts         # Supabase Auth & Guest account session upgrade
 │   │   ├── colony-service.ts       # Client API wrapper for Edge Functions
@@ -242,3 +249,7 @@ npx supabase functions deploy action
 ## 📜 License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details. Built as part of the Zero To Mastery (ZTM) Mars Colony initiative.
+
+### 3D renderer verification
+
+With the dev server running, open `/tests/renderer-check.html`. This isolated browser check verifies terrain picking at all 400 tile centers, picking all seven buildings, rendering operational/broken/buried/deactivated states, and that rendering does not mutate the source fixture. It requires no Supabase account and performs no network writes.

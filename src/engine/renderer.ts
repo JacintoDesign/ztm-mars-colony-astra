@@ -1,15 +1,7 @@
-import { getTileVertices, IsoConfig, GridPoint, screenToGrid } from './iso-math';
+import { IsoConfig, GridPoint } from './iso-math';
+import { ColonyScene } from './colony-scene';
 import { ColonyStore } from '../simulation/store';
-import { Building, BuildingType } from '../simulation/types';
-import {
-  drawBuilding,
-  drawColonist,
-  drawRover,
-  drawAsteroid,
-  drawBuildingConditionOverlay,
-  drawLandingCapsule,
-  drawLandingPad,
-} from '../assets/building-renderers';
+import { Building, BuildingType, ColonyState } from '../simulation/types';
 import { StatusLevel } from '../ui/toolbar';
 
 export interface RendererOptions {
@@ -22,15 +14,15 @@ export interface RendererOptions {
   onToolDeselect?: () => void;
 }
 
-function tileColorHash(gx: number, gy: number): number {
-  let h = gx * 374761393 + gy * 668265263;
-  h = (h ^ (h >> 13)) * 1274126177;
-  return ((h ^ (h >> 16)) >>> 0) / 4294967296;
-}
-
 export class IsometricRenderer {
+  private previewState: ColonyState | null = null;
+  public setPreviewState(state: ColonyState | null): void {
+    this.previewState = state;
+    this.requestRender();
+  }
   private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private scene: ColonyScene;
+  private unsubscribe?: () => void;
   private store: ColonyStore;
   private config: IsoConfig;
   private hoveredTile: GridPoint | null = null;
@@ -41,7 +33,6 @@ export class IsometricRenderer {
   private onStatusChange?: (message: string, level: StatusLevel) => void;
   private onSelectBuilding?: (buildingId: string | null) => void;
   private onToolDeselect?: () => void;
-  private dpr = 1;
   private animationFrameId: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -49,6 +40,26 @@ export class IsometricRenderer {
   private zoomLevel: number = 1.0;
   private panOffsetX: number = 0;
   private panOffsetY: number = 0;
+  private mouseDrag: { x: number; y: number; moved: boolean } | null = null;
+  private suppressClick = false;
+  private handlePointerDown = (e: PointerEvent): void => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    this.mouseDrag = { x: e.clientX, y: e.clientY, moved: false };
+    this.canvas.setPointerCapture(e.pointerId);
+  };
+  private handlePointerMove = (e: PointerEvent): void => {
+    if (!this.mouseDrag) return;
+    const dx = e.clientX - this.mouseDrag.x, dy = e.clientY - this.mouseDrag.y;
+    if (!this.mouseDrag.moved && Math.hypot(dx, dy) < 5) return;
+    this.mouseDrag.moved = true;
+    this.panOffsetX += dx; this.panOffsetY += dy;
+    this.mouseDrag.x = e.clientX; this.mouseDrag.y = e.clientY;
+    this.handleResize();
+  };
+  private handlePointerUp = (): void => {
+    this.suppressClick = this.mouseDrag?.moved ?? false;
+    this.mouseDrag = null;
+  };
   private touchStartDistance: number = 0;
   private touchStartZoom: number = 1.0;
   private touchStartX: number = 0;
@@ -59,11 +70,7 @@ export class IsometricRenderer {
 
   constructor(options: RendererOptions) {
     this.canvas = options.canvas;
-    const ctx = this.canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Failed to get 2D context from canvas');
-    }
-    this.ctx = ctx;
+    this.scene = new ColonyScene(this.canvas, options.gridSize ?? 20);
     this.store = options.store;
     this.onHoverTile = options.onHoverTile;
     this.onStatusChange = options.onStatusChange;
@@ -92,7 +99,7 @@ export class IsometricRenderer {
 
     this.setupEvents();
     this.handleResize();
-    this.store.subscribe(() => {
+    this.unsubscribe = this.store.subscribe(() => {
       this.updateStatus();
       this.requestRender();
     });
@@ -183,6 +190,8 @@ export class IsometricRenderer {
   }
 
   public destroy(): void {
+    this.unsubscribe?.();
+    this.scene.destroy();
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -192,6 +201,10 @@ export class IsometricRenderer {
       this.resizeObserver = null;
     }
     window.removeEventListener('resize', this.handleResize);
+    this.canvas.removeEventListener('pointerdown', this.handlePointerDown);
+    this.canvas.removeEventListener('pointermove', this.handlePointerMove);
+    this.canvas.removeEventListener('pointerup', this.handlePointerUp);
+    this.canvas.removeEventListener('pointercancel', this.handlePointerUp);
     this.canvas.removeEventListener('mousemove', this.handleMouseMove);
     this.canvas.removeEventListener('mouseleave', this.handleMouseLeave);
     this.canvas.removeEventListener('click', this.handleClick);
@@ -204,6 +217,10 @@ export class IsometricRenderer {
 
   private setupEvents(): void {
     window.addEventListener('resize', this.handleResize);
+    this.canvas.addEventListener('pointerdown', this.handlePointerDown);
+    this.canvas.addEventListener('pointermove', this.handlePointerMove);
+    this.canvas.addEventListener('pointerup', this.handlePointerUp);
+    this.canvas.addEventListener('pointercancel', this.handlePointerUp);
     this.canvas.addEventListener('mousemove', this.handleMouseMove);
     this.canvas.addEventListener('mouseleave', this.handleMouseLeave);
     this.canvas.addEventListener('click', this.handleClick);
@@ -291,36 +308,10 @@ export class IsometricRenderer {
   }
 
   private handleTouchEnd(e: TouchEvent): void {
-    if (!this.hasMovedSignificantly && e.changedTouches.length > 0) {
+    e.preventDefault();
+    if (e.type !== 'touchcancel' && !this.hasMovedSignificantly && e.changedTouches.length > 0) {
       const touch = e.changedTouches[0];
-      const rect = this.canvas.getBoundingClientRect();
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-
-      if (!this.relocatingBuildingId && !this.selectedTool) {
-        const clickedBuilding = this.findBuildingAtScreen(x, y);
-        if (clickedBuilding) {
-          this.setSelectedBuildingId(clickedBuilding.id);
-          const neighbors = this.store.getState().buildings.filter(
-            (other) => other.id !== clickedBuilding.id && Math.abs(clickedBuilding.x - other.x) + Math.abs(clickedBuilding.y - other.y) === 1
-          ).length;
-          const spacingInfo = neighbors > 1 ? `Crowded (-${neighbors - 1} output)` : 'Optimal Spacing (100%)';
-          if (this.onStatusChange) {
-            this.onStatusChange(
-              `[${clickedBuilding.type.toUpperCase()}] ${clickedBuilding.condition.toUpperCase()} | Neighbors: ${neighbors} (${spacingInfo})`,
-              neighbors > 1 ? 'warning' : 'nominal'
-            );
-          }
-          this.requestRender();
-          return;
-        }
-      }
-
-      const tile = screenToGrid(x, y, this.config);
-      this.setSelectedBuildingId(null);
-      if (tile) {
-        this.handleTileAction(tile);
-      }
+      this.handleClick(new MouseEvent('click', { clientX: touch.clientX, clientY: touch.clientY }));
     }
   }
 
@@ -328,9 +319,6 @@ export class IsometricRenderer {
     const width = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
     const height = Math.max(window.innerHeight, document.documentElement.clientHeight || 0);
 
-    this.dpr = window.devicePixelRatio || 1;
-    this.canvas.width = Math.floor(width * this.dpr);
-    this.canvas.height = Math.floor(height * this.dpr);
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
 
@@ -370,56 +358,13 @@ export class IsometricRenderer {
   }
 
   public findBuildingAtScreen(screenX: number, screenY: number): Building | null {
-    const buildings = this.store.getState().buildings;
-    if (buildings.length === 0) return null;
-
-    // Sort front-to-back by isometric depth (higher x + y first) so foreground structures take precedence
-    const sorted = [...buildings].sort((a, b) => {
-      const depthA = a.x + a.y;
-      const depthB = b.x + b.y;
-      if (depthA !== depthB) return depthB - depthA;
-      return b.y - a.y;
-    });
-
-    const halfW = this.config.tileWidth / 2;
-    const s = halfW / 32;
-
-    for (const b of sorted) {
-      const v = getTileVertices(b.x, b.y, this.config);
-      
-      // Building vertical heights by type
-      let heightPx = 36;
-      if (b.type === 'scrubber') heightPx = 55;
-      else if (b.type === 'solar') heightPx = 45;
-      else if (b.type === 'refinery') heightPx = 48;
-      else if (b.type === 'extractor') heightPx = 42;
-      else if (b.type === 'habitat') heightPx = 38;
-      else if (b.type === 'farm') heightPx = 32;
-      else if (b.type === 'garage') heightPx = 32;
-
-      const topY = v.top.y - heightPx * s;
-      const bottomY = v.bottom.y + 4 * s;
-      const leftX = v.center.x - halfW * 1.05;
-      const rightX = v.center.x + halfW * 1.05;
-
-      // Check if point is within the 3D visual bounding box of this building
-      if (screenX >= leftX && screenX <= rightX && screenY >= topY && screenY <= bottomY) {
-        return b;
-      }
-    }
-
-    // Fallback: check flat ground diamond
-    const tile = screenToGrid(screenX, screenY, this.config);
-    if (tile) {
-      return buildings.find((b) => b.x === tile.x && b.y === tile.y) ?? null;
-    }
-
-    return null;
+    const id = this.scene.buildingAt(screenX, screenY);
+    return this.store.getState().buildings.find(b => b.id === id) ?? null;
   }
 
   private handleMouseMove(e: MouseEvent): void {
     const { x, y } = this.getCanvasCoords(e);
-    const tile = screenToGrid(x, y, this.config);
+    const tile = this.scene.tileAt(x, y);
 
     // Update cursor style
     if (this.selectedTool || this.relocatingBuildingId) {
@@ -452,8 +397,10 @@ export class IsometricRenderer {
   }
 
   private handleClick(e: MouseEvent): void {
+    if (this.previewState) return;
+    if (this.suppressClick) { this.suppressClick = false; return; }
     const { x, y } = this.getCanvasCoords(e);
-    const tile = screenToGrid(x, y, this.config);
+    const tile = this.scene.tileAt(x, y);
 
     // 1. Selection Mode: Test 3D building sprite first
     const clickedBuilding = this.findBuildingAtScreen(x, y);
@@ -590,475 +537,19 @@ export class IsometricRenderer {
 
   private render(): void {
     this.animationFrameId = null;
-    const ctx = this.ctx;
-    const width = this.canvas.width / this.dpr;
-    const height = this.canvas.height / this.dpr;
-
-    // Reset transform matrix and apply DPR scale
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-
-    // 1. Dark Martian background
-    ctx.fillStyle = '#1a0e08';
-    ctx.fillRect(0, 0, width, height);
-
-    // 2. 3D Geological Crust Slab
-    this.render3DSlab(ctx);
-
-    // 3. 20x20 Isometric Terrain Grid
-    this.renderTerrainGrid(ctx);
-
-    // 4. Placed Buildings & Colonists sorted back-to-front
-    this.renderEntities(ctx);
-
-    // 5. Atmospheric Haze effect per DESIGN.md (tints when oxygen < 50)
-    this.renderAtmosphericHaze(ctx, width, height);
-
-    // 6. Hover Highlight & Placement Ghost Preview
-    this.renderHoverHighlight(ctx);
-  }
-
-  /**
-   * Renders atmospheric dusty haze over the scene as oxygen drops below 50.
-   */
-  private renderAtmosphericHaze(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-    const oxygen = this.store.getState().oxygen;
-    if (oxygen < 50) {
-      const severity = (50 - oxygen) / 50; // 0 at oxygen=50, 1 at oxygen=0
-      const opacity = severity * 0.48; // Max 48% dusty red-orange haze
-      ctx.fillStyle = `rgba(180, 80, 20, ${opacity})`;
-      ctx.fillRect(0, 0, width, height);
+    const state = this.previewState ?? this.store.getState();
+    const tile = this.previewState ? null : this.hoveredTile;
+    const canPlace = !!tile && (this.selectedTool
+      ? this.store.checkPlacement(this.selectedTool, tile.x, tile.y).canPlace
+      : !state.buildings.some(b => b.x === tile.x && b.y === tile.y) && !(tile.x === 0 && tile.y === 0) && state.power >= 10);
+    const config = { ...this.config };
+    if (this.previewState) {
+      config.tileWidth = Math.min(window.innerWidth / 24, window.innerHeight / 14) * 1.35;
+      config.tileHeight = config.tileWidth / 2;
+      config.originX = window.innerWidth / 2;
+      config.originY = window.innerHeight * .52 - config.tileWidth * 5;
     }
-  }
-
-  private render3DSlab(ctx: CanvasRenderingContext2D): void {
-    const { gridSize, tileHeight } = this.config;
-    const slabDepth = Math.max(30, Math.floor(tileHeight * 1.15));
-
-    // Front-Left Cliff
-    const gy = gridSize - 1;
-    for (let gx = 0; gx < gridSize; gx++) {
-      const v = getTileVertices(gx, gy, this.config);
-      ctx.fillStyle = '#1e0e07';
-      ctx.beginPath();
-      ctx.moveTo(v.left.x, v.left.y);
-      ctx.lineTo(v.bottom.x, v.bottom.y);
-      ctx.lineTo(v.bottom.x, v.bottom.y + slabDepth);
-      ctx.lineTo(v.left.x, v.left.y + slabDepth);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = '#29140b';
-      ctx.beginPath();
-      ctx.moveTo(v.left.x, v.left.y + slabDepth * 0.25);
-      ctx.lineTo(v.bottom.x, v.bottom.y + slabDepth * 0.25);
-      ctx.lineTo(v.bottom.x, v.bottom.y + slabDepth * 0.6);
-      ctx.lineTo(v.left.x, v.left.y + slabDepth * 0.6);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = '#120703';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(v.bottom.x, v.bottom.y);
-      ctx.lineTo(v.bottom.x, v.bottom.y + slabDepth);
-      ctx.stroke();
-    }
-
-    // Front-Right Cliff
-    const gx = gridSize - 1;
-    for (let gyCurrent = gridSize - 1; gyCurrent >= 0; gyCurrent--) {
-      const v = getTileVertices(gx, gyCurrent, this.config);
-      ctx.fillStyle = '#2f180e';
-      ctx.beginPath();
-      ctx.moveTo(v.bottom.x, v.bottom.y);
-      ctx.lineTo(v.right.x, v.right.y);
-      ctx.lineTo(v.right.x, v.right.y + slabDepth);
-      ctx.lineTo(v.bottom.x, v.bottom.y + slabDepth);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = '#3c2013';
-      ctx.beginPath();
-      ctx.moveTo(v.bottom.x, v.bottom.y + slabDepth * 0.25);
-      ctx.lineTo(v.right.x, v.right.y + slabDepth * 0.25);
-      ctx.lineTo(v.right.x, v.right.y + slabDepth * 0.6);
-      ctx.lineTo(v.bottom.x, v.bottom.y + slabDepth * 0.6);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = '#1a0d06';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(v.right.x, v.right.y);
-      ctx.lineTo(v.right.x, v.right.y + slabDepth);
-      ctx.stroke();
-    }
-  }
-
-  private renderTerrainGrid(ctx: CanvasRenderingContext2D): void {
-    const { gridSize } = this.config;
-
-    for (let gy = 0; gy < gridSize; gy++) {
-      for (let gx = 0; gx < gridSize; gx++) {
-        const v = getTileVertices(gx, gy, this.config);
-        const rand = tileColorHash(gx, gy);
-
-        ctx.beginPath();
-        ctx.moveTo(v.top.x, v.top.y);
-        ctx.lineTo(v.right.x, v.right.y);
-        ctx.lineTo(v.bottom.x, v.bottom.y);
-        ctx.lineTo(v.left.x, v.left.y);
-        ctx.closePath();
-
-        if (rand > 0.85) ctx.fillStyle = '#361c10';
-        else if (rand > 0.65) ctx.fillStyle = '#30180d';
-        else if (rand > 0.35) ctx.fillStyle = '#2b160c';
-        else if (rand > 0.15) ctx.fillStyle = '#251208';
-        else ctx.fillStyle = '#200f07';
-        ctx.fill();
-
-        ctx.strokeStyle = '#3d2417';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Draw Landing Pad simple circle on (0, 0) ONLY if no ship is currently landed
-        if (gx === 0 && gy === 0 && this.store.getState().pendingArrivals.length === 0) {
-          drawLandingPad(ctx, v.center, this.config.tileWidth / 2, this.config.tileHeight / 2);
-        }
-      }
-    }
-
-    // Highlight Ore Deposits when placing or relocating an Extractor (without displaying numeric amount until placed)
-    const state = this.store.getState();
-    const isExtractorMode = this.selectedTool === 'extractor' ||
-      (this.relocatingBuildingId && state.buildings.find((b) => b.id === this.relocatingBuildingId)?.type === 'extractor');
-
-    if (isExtractorMode) {
-      for (const deposit of state.oreDeposits) {
-        if (deposit.remaining > 0) {
-          const v = getTileVertices(deposit.x, deposit.y, this.config);
-
-          ctx.beginPath();
-          ctx.moveTo(v.top.x, v.top.y);
-          ctx.lineTo(v.right.x, v.right.y);
-          ctx.lineTo(v.bottom.x, v.bottom.y);
-          ctx.lineTo(v.left.x, v.left.y);
-          ctx.closePath();
-          ctx.fillStyle = 'rgba(78, 201, 176, 0.28)';
-          ctx.fill();
-          ctx.strokeStyle = '#4ec9b0';
-          ctx.lineWidth = 1.8;
-          ctx.stroke();
-
-          // Subtle ore diamond badge
-          ctx.fillStyle = '#7fd4e0';
-          ctx.font = 'bold 9px "Orbitron", monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('◆ ORE', v.center.x, v.center.y);
-        }
-      }
-    }
-  }
-
-  /**
-   * Renders placed buildings, colonists, rovers, asteroids, and landing zone pending arrivals sorted back-to-front by depth (x + y).
-   */
-  private renderEntities(ctx: CanvasRenderingContext2D): void {
-    const state = this.store.getState();
-    const isPowered = state.power > 0;
-    const halfW = this.config.tileWidth / 2;
-    const halfH = this.config.tileHeight / 2;
-
-    // Combined entity list for unified depth sorting
-    type RenderItem =
-      | { kind: 'building'; x: number; y: number; building: typeof state.buildings[0] }
-      | { kind: 'colonist'; x: number; y: number; colonist: typeof state.colonists[0] }
-      | { kind: 'rover'; x: number; y: number; rover: typeof state.rovers[0] }
-      | { kind: 'asteroid'; x: number; y: number; asteroid: typeof state.activeAsteroid };
-
-    const entities: RenderItem[] = [
-      ...state.buildings.map((b) => ({ kind: 'building' as const, x: b.x, y: b.y, building: b })),
-      ...state.colonists.map((c) => ({ kind: 'colonist' as const, x: c.x, y: c.y, colonist: c })),
-      ...state.rovers
-        .filter((r) => r.state !== 'idle_at_base')
-        .map((r) => ({ kind: 'rover' as const, x: r.x, y: r.y, rover: r })),
-    ];
-
-    if (state.activeAsteroid) {
-      entities.push({
-        kind: 'asteroid',
-        x: state.activeAsteroid.x,
-        y: state.activeAsteroid.y,
-        asteroid: state.activeAsteroid,
-      });
-    }
-
-    // Depth sort entities back-to-front by isometric distance (x + y)
-    entities.sort((a, b) => {
-      const depthA = a.x + a.y;
-      const depthB = b.x + b.y;
-      if (depthA !== depthB) {
-        return depthA - depthB;
-      }
-      return a.y - b.y;
-    });
-
-    for (const item of entities) {
-      if (item.kind === 'building') {
-        const b = item.building;
-        const isOperational = b.condition === 'operational';
-        const tileDeposit = this.store.getTileOre(b.x, b.y);
-
-        let isProducing = false;
-        let dockedRovers = 2;
-
-        if (b.type === 'garage') {
-          dockedRovers = state.rovers.filter((r) => r.state === 'idle_at_base' && r.garageX === b.x && r.garageY === b.y).length;
-        }
-
-        if (isOperational) {
-          if (b.type === 'solar') isProducing = isPowered;
-          else if (b.type === 'scrubber') isProducing = state.power >= 3;
-          else if (b.type === 'extractor') isProducing = tileDeposit > 0 && state.power >= 4;
-          else if (b.type === 'farm') isProducing = state.power >= 2;
-        }
-
-        drawBuilding(ctx, {
-          type: b.type,
-          x: b.x,
-          y: b.y,
-          config: this.config,
-          isPreview: false,
-          isPowered: isPowered && isOperational,
-          isProducing,
-          dockedRovers,
-        });
-
-        // Condition overlay if broken or buried
-        if (b.condition !== 'operational') {
-          const v = getTileVertices(b.x, b.y, this.config);
-          drawBuildingConditionOverlay(ctx, v.center, halfW, halfH, b.condition);
-        }
-      } else if (item.kind === 'colonist') {
-        const c = item.colonist;
-        const v = getTileVertices(c.x, c.y, this.config);
-        drawColonist(ctx, v.center, c.health, c.age, c.lifespan, halfW);
-      } else if (item.kind === 'rover') {
-        const r = item.rover;
-        const v = getTileVertices(r.x, r.y, this.config);
-        const occupants = r.occupants ?? (r.state === 'idle_at_base' ? 0 : 1);
-        drawRover(ctx, v.center, r.power, occupants, halfW);
-      } else if (item.kind === 'asteroid') {
-        const a = item.asteroid!;
-        const v = getTileVertices(a.x, a.y, this.config);
-        drawAsteroid(ctx, v.center, halfW, halfH);
-      }
-    }
-
-    // Render Landing Zone (0, 0) pending arrivals with compact lunar/mars landing capsule
-    if (state.pendingArrivals.length > 0) {
-      const v0 = getTileVertices(0, 0, this.config);
-      const arrival = state.pendingArrivals[0];
-      drawLandingCapsule(ctx, v0.center, halfW, halfH, arrival.ticksRemaining);
-    }
-  }
-
-  private renderHoverHighlight(ctx: CanvasRenderingContext2D): void {
-    const state = this.store.getState();
-
-    // 1. Draw Selection Highlight around currently selected building or Landing Pad
-    if (this.selectedBuildingId) {
-      if (this.selectedBuildingId === 'landing_pad') {
-        const sv = getTileVertices(0, 0, this.config);
-        const hasArrival = state.pendingArrivals.length > 0;
-        const mainColor = hasArrival ? '#E0A030' : '#4ec9b0';
-        const fillColor = hasArrival ? 'rgba(224, 160, 48, 0.25)' : 'rgba(78, 201, 176, 0.25)';
-
-        ctx.beginPath();
-        ctx.moveTo(sv.top.x, sv.top.y);
-        ctx.lineTo(sv.right.x, sv.right.y);
-        ctx.lineTo(sv.bottom.x, sv.bottom.y);
-        ctx.lineTo(sv.left.x, sv.left.y);
-        ctx.closePath();
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-        ctx.strokeStyle = mainColor;
-        ctx.lineWidth = 2.2;
-        ctx.stroke();
-      }
-
-      const selectedBld = state.buildings.find((b) => b.id === this.selectedBuildingId);
-      if (selectedBld) {
-        const sv = getTileVertices(selectedBld.x, selectedBld.y, this.config);
-        const halfW = this.config.tileWidth / 2;
-        const s = halfW / 32;
-        const isDeact = selectedBld.condition === 'deactivated';
-        const isBroken = selectedBld.condition === 'broken';
-        const isBuried = selectedBld.condition === 'buried';
-
-        const mainColor = isDeact ? '#E0A030' : isBroken ? '#D94F3D' : isBuried ? '#fbbf24' : '#4ec9b0';
-        const fillColor = isDeact ? 'rgba(224, 160, 48, 0.25)' : isBroken ? 'rgba(217, 79, 61, 0.25)' : 'rgba(78, 201, 176, 0.25)';
-
-        // Base tile highlight
-        ctx.beginPath();
-        ctx.moveTo(sv.top.x, sv.top.y);
-        ctx.lineTo(sv.right.x, sv.right.y);
-        ctx.lineTo(sv.bottom.x, sv.bottom.y);
-        ctx.lineTo(sv.left.x, sv.left.y);
-        ctx.closePath();
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-        ctx.strokeStyle = mainColor;
-        ctx.lineWidth = 2.2;
-        ctx.stroke();
-
-        // 3D Corner Brackets around structure
-        let heightPx = 36;
-        if (selectedBld.type === 'scrubber') heightPx = 55;
-        else if (selectedBld.type === 'solar') heightPx = 45;
-        else if (selectedBld.type === 'refinery') heightPx = 48;
-        else if (selectedBld.type === 'extractor') heightPx = 42;
-        else if (selectedBld.type === 'habitat') heightPx = 38;
-        else if (selectedBld.type === 'farm') heightPx = 32;
-        else if (selectedBld.type === 'garage') heightPx = 32;
-
-        const boxTop = sv.top.y - heightPx * s;
-        const boxLeft = sv.center.x - halfW * 0.9;
-        const boxRight = sv.center.x + halfW * 0.9;
-        const boxBottom = sv.bottom.y;
-        const bracketLen = 8 * s;
-
-        ctx.strokeStyle = mainColor;
-        ctx.lineWidth = 1.8;
-
-        // Top-left bracket
-        ctx.beginPath();
-        ctx.moveTo(boxLeft, boxTop + bracketLen);
-        ctx.lineTo(boxLeft, boxTop);
-        ctx.lineTo(boxLeft + bracketLen, boxTop);
-        ctx.stroke();
-
-        // Top-right bracket
-        ctx.beginPath();
-        ctx.moveTo(boxRight - bracketLen, boxTop);
-        ctx.lineTo(boxRight, boxTop);
-        ctx.lineTo(boxRight, boxTop + bracketLen);
-        ctx.stroke();
-
-        // Bottom-left bracket
-        ctx.beginPath();
-        ctx.moveTo(boxLeft, boxBottom - bracketLen);
-        ctx.lineTo(boxLeft, boxBottom);
-        ctx.lineTo(boxLeft + bracketLen, boxBottom);
-        ctx.stroke();
-
-        // Bottom-right bracket
-        ctx.beginPath();
-        ctx.moveTo(boxRight - bracketLen, boxBottom);
-        ctx.lineTo(boxRight, boxBottom);
-        ctx.lineTo(boxRight, boxBottom - bracketLen);
-        ctx.stroke();
-
-        // Floating status tag above structure
-        const tagText = isDeact ? '⚡ POWER OFF' : isBroken ? '⚠ BROKEN' : isBuried ? '▼ BURIED' : '● POWER ON';
-        ctx.font = `bold ${Math.max(9, Math.floor(10 * s))}px 'Share Tech Mono', monospace`;
-        const textMetrics = ctx.measureText(tagText);
-        const tagW = textMetrics.width + 12 * s;
-        const tagH = 15 * s;
-        const tagX = sv.center.x - tagW / 2;
-        const tagY = boxTop - tagH - 4 * s;
-
-        ctx.fillStyle = 'rgba(18, 9, 5, 0.9)';
-        ctx.fillRect(tagX, tagY, tagW, tagH);
-        ctx.strokeStyle = mainColor;
-        ctx.lineWidth = 1.2;
-        ctx.strokeRect(tagX, tagY, tagW, tagH);
-
-        ctx.fillStyle = mainColor;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(tagText, sv.center.x, tagY + tagH / 2);
-      }
-    }
-
-    if (!this.hoveredTile) return;
-
-    const { x, y } = this.hoveredTile;
-    const v = getTileVertices(x, y, this.config);
-
-    ctx.beginPath();
-    ctx.moveTo(v.top.x, v.top.y);
-    ctx.lineTo(v.right.x, v.right.y);
-    ctx.lineTo(v.bottom.x, v.bottom.y);
-    ctx.lineTo(v.left.x, v.left.y);
-    ctx.closePath();
-
-    // 2. Relocation Mode Highlight
-    if (this.relocatingBuildingId) {
-      const relocatingBld = state.buildings.find((b) => b.id === this.relocatingBuildingId);
-      const isOccupied = state.buildings.some((b) => b.x === x && b.y === y);
-      const isReserved = x === 0 && y === 0;
-      const canRelocate = !isOccupied && !isReserved && state.power >= 10;
-
-      if (!canRelocate) {
-        ctx.fillStyle = 'rgba(217, 79, 61, 0.25)';
-        ctx.fill();
-        ctx.strokeStyle = '#D94F3D';
-        ctx.lineWidth = 1.8;
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = 'rgba(78, 201, 176, 0.2)';
-        ctx.fill();
-        ctx.strokeStyle = '#4ec9b0';
-        ctx.lineWidth = 1.8;
-        ctx.stroke();
-
-        if (relocatingBld) {
-          drawBuilding(ctx, {
-            type: relocatingBld.type,
-            x,
-            y,
-            config: this.config,
-            isPreview: true,
-          });
-        }
-      }
-      return;
-    }
-
-    // 3. Placement Tool Mode Highlight
-    if (this.selectedTool) {
-      const check = this.store.checkPlacement(this.selectedTool, x, y);
-
-      if (!check.canPlace) {
-        ctx.fillStyle = 'rgba(217, 79, 61, 0.25)';
-        ctx.fill();
-        ctx.strokeStyle = '#D94F3D';
-        ctx.lineWidth = 1.8;
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = 'rgba(217, 221, 224, 0.12)';
-        ctx.fill();
-        ctx.strokeStyle = '#d9dde0';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        drawBuilding(ctx, {
-          type: this.selectedTool,
-          x,
-          y,
-          config: this.config,
-          isPreview: true,
-        });
-      }
-    } else {
-      ctx.fillStyle = 'rgba(217, 221, 224, 0.12)';
-      ctx.fill();
-      ctx.strokeStyle = '#8c9ba5';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
+    this.scene.render(config, state, tile, this.selectedTool, this.selectedBuildingId, canPlace, !!this.relocatingBuildingId);
   }
 
   private updateStatus(): void {

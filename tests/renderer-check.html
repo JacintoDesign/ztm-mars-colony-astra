@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+  <body style="margin: 0">
+    <canvas style="width: 100vw; height: 100vh"></canvas>
+    <pre
+      id="result"
+      style="position: absolute; top: 0; background: white"
+    ></pre>
+    <script type="module">
+      import { ColonyScene, terrainHeight, surfaceHeight } from "/src/engine/colony-scene.ts";
+      import { gridToWorld } from "/src/engine/iso-math.ts";
+      import { state } from "/src/model-preview-state.ts";
+      import { Vector3 } from "three";
+      const canvas = document.querySelector("canvas"),
+        scene = new ColonyScene(canvas, 20);
+      const config = {
+        gridSize: 20,
+        tileWidth: 40,
+        tileHeight: 20,
+        originX: innerWidth / 2,
+        originY: 80,
+      };
+      const before = JSON.stringify(state);
+      const failures = [];
+      let checks = 0;
+      for (const condition of [
+        "operational",
+        "broken",
+        "buried",
+        "deactivated",
+      ]) {
+        const fixture = {
+          ...state,
+          buildings: state.buildings.map((b) => ({ ...b, condition })),
+          pendingArrivals: [
+            { id: "test", landedAtTick: 0, electronics: 2, ticksRemaining: 20 },
+          ],
+        };
+        scene.render(
+          config,
+          fixture,
+          { x: 12, y: 12 },
+          "farm",
+          "habitat",
+          true,
+          false,
+        );
+        checks++;
+      }
+      scene.render(config, state, null, null, null, true, false);
+      for (let x = 0; x < 20; x++)
+        for (let y = 0; y < 20; y++) {
+          const w = gridToWorld(x, y),
+            p = new Vector3(w.x, terrainHeight(w.x, w.z), w.z).project(
+              scene.camera,
+            );
+          const actual = scene.tileAt(
+            ((p.x + 1) * innerWidth) / 2,
+            ((1 - p.y) * innerHeight) / 2,
+          );
+          if (!actual || actual.x !== x || actual.y !== y)
+            failures.push(`Tile ${x},${y}: ${JSON.stringify(actual)}`);
+          checks++;
+        }
+      for (const b of state.buildings) {
+        const w = gridToWorld(b.x, b.y),
+          p = new Vector3(w.x, terrainHeight(w.x, w.z) + 0.3, w.z).project(
+            scene.camera,
+          );
+        const id = scene.buildingAt(
+          ((p.x + 1) * innerWidth) / 2,
+          ((1 - p.y) * innerHeight) / 2,
+        );
+        if (id !== b.id) failures.push(`Building ${b.id}: ${id}`);
+        checks++;
+      }
+      if (JSON.stringify(state) !== before)
+        failures.push("Renderer mutated fixture");
+      checks++;
+      const rocks = [];
+      scene.scene.updateMatrixWorld(true);
+      scene.scene.traverse(object => {
+        if (object.userData.sceneryRock) rocks.push(object);
+        if (object.userData.asteroid) {
+          if (object.children.length !== 1) failures.push("Asteroid has extra surface lines");
+          checks++;
+        }
+      });
+      if (rocks.length !== 287) failures.push(`Unexpected rock count: ${rocks.length}`);
+      const landing = gridToWorld(0, 0);
+      for (const [i, rock] of rocks.entries()) {
+        const radius = rock.userData.sceneryRock.radius;
+        if (Math.hypot(rock.position.x - landing.x, rock.position.z - landing.z) - radius < 3.5)
+          failures.push("Rock encroaches on landing approach");
+        checks++;
+        for (const other of rocks.slice(i + 1)) {
+          if (rock.position.distanceTo(new Vector3(other.position.x, rock.position.y, other.position.z)) <
+              .9 * (radius + other.userData.sceneryRock.radius) - 1e-8)
+            failures.push("Excessive rock footprint overlap");
+          checks++;
+        }
+        if (rock.position.y >= surfaceHeight(rock.position.x, rock.position.z, 20))
+          failures.push("Rock center is not submerged");
+        const vertices = rock.geometry.getAttribute("position");
+        for (let v = 0; v < vertices.count; v++) {
+          const point = new Vector3().fromBufferAttribute(vertices, v).applyMatrix4(rock.matrixWorld);
+          if (point.x < -6 || point.x > 26 || point.z < -6 || point.z > 26)
+            failures.push("Rock extends past terrain edge");
+
+        }
+        checks++;
+      }
+      document.getElementById("result").textContent = JSON.stringify(
+        { checks, failures, geometries: scene.renderer.info.memory.geometries },
+        null,
+        2,
+      );
+    </script>
+  </body>
+</html>

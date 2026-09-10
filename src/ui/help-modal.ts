@@ -122,6 +122,7 @@ export class HelpModal {
         </div>
 
         <div class="help-modal-content">
+          <p><a class="model-gallery-link" href="/model-preview.html" target="_blank" rel="noopener">EXPLORE 3D MODELS &amp; BUILDING STATES →</a></p>
           <!-- Section 1: Survival Goal -->
           <div class="help-section">
             <div class="help-section-title">1. SURVIVAL & LIFE SUPPORT</div>

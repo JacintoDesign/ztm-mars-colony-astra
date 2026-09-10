@@ -1,0 +1,133 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #211a17;
+  color: #ded5bf;
+  font-family: Arial, sans-serif;
+}
+canvas {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  touch-action: none;
+}
+header {
+  position: absolute;
+  left: 38px;
+  top: 32px;
+  pointer-events: none;
+}
+header span {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: #bd9b7b;
+}
+h1 {
+  font-weight: 400;
+  font-size: 44px;
+  letter-spacing: -2px;
+  margin: 12px 0;
+}
+header p {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #b49b86;
+}
+aside {
+  position: absolute;
+  left: 38px;
+  bottom: 38px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: #b8a797;
+}
+aside b {
+  letter-spacing: 2px;
+  color: #ded5bf;
+}
+aside a {
+  display: inline-block;
+  color: #ded5bf;
+  text-decoration: none;
+  border-bottom: 1px solid #8c725c;
+  letter-spacing: 2px;
+  padding: 8px 0;
+}
+#selection {
+  position: absolute;
+  right: 30px;
+  bottom: 35px;
+  letter-spacing: 2px;
+  font-size: 10px;
+}
+.scene-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.scene-labels span {
+  position: absolute;
+}
+@media (max-width: 600px) {
+  header {
+    left: 20px;
+    top: 20px;
+  }
+  h1 {
+    font-size: 30px;
+  }
+  aside {
+    left: 20px;
+    bottom: 45px;
+    font-size: 10px;
+  }
+  #selection {
+    left: 20px;
+    bottom: 20px;
+  }
+}
+header,
+aside {
+  background: #211a17e8;
+  padding: 20px;
+  border-left: 1px solid #866a52;
+}
+header span,
+header p,
+aside {
+  color: #c9b6a3;
+}
+header {
+  top: 24px;
+  left: 24px;
+}
+aside {
+  left: 24px;
+  bottom: 24px;
+}
+#selection {
+  background: #211a17e8;
+  padding: 10px;
+}
+@media (max-width: 600px) {
+  header {
+    left: 12px;
+    top: 12px;
+    padding: 12px;
+  }
+  aside {
+    left: 12px;
+    bottom: 48px;
+    padding: 12px;
+  }
+  #selection {
+    left: 12px;
+    bottom: 8px;
+    right: auto;
+  }
+}
+.preview-views { display:flex; gap:8px; flex-wrap:wrap; }
+.preview-views button { color:#ded5bf; background:#30251c; border:1px solid #866a52; padding:8px; cursor:pointer; font:10px Arial,sans-serif; letter-spacing:1px; }
+.scene-labels span { transform:translate(-50%,-100%); background:#211a17de; padding:3px 5px; font:9px Arial,sans-serif; letter-spacing:1px; white-space:nowrap; }
