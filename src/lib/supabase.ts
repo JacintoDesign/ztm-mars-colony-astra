@@ -14,4 +14,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase URL or Anon Key is missing. Check your .env.local file.');
 }
 
+export const SUPABASE_URL = supabaseUrl;
+export const SUPABASE_ANON_KEY = supabaseAnonKey;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

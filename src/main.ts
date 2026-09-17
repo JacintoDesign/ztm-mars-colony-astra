@@ -33,6 +33,7 @@ const helpModal = new HelpModal({
   onOpen: () => {
     stopSimulationLoops();
     toolbar.setStatus('Simulation Paused (Reviewing Manual)', 'warning');
+    void flushAuthoritativeTicks();
   },
   onClose: async () => {
     if (gameSettings.isModalOpen()) return;
@@ -53,9 +54,7 @@ const gameSettings = new GameSettings({
   onOpen: () => {
     stopSimulationLoops();
     toolbar.setStatus('Simulation Paused (Settings)', 'warning');
-    if (activeColonyId && activeUserId) {
-      void colonyService.updateLastTickTime(activeColonyId, activeUserId);
-    }
+    void flushAuthoritativeTicks();
   },
   onClose: async () => {
     if (helpModal.isModalOpen()) return;
@@ -274,6 +273,7 @@ let activeUserDisplay: string = 'none';
 let isInitializingUserId: string | null = null;
 let clientProjectionInterval: number | null = null;
 let serverSyncInterval: number | null = null;
+let serverSyncTimeout: number | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 let lastAutopilotTick = -1;
 
@@ -400,13 +400,13 @@ const authModal = new AuthModal({
 });
 
 /**
- * Starts the continuous 1-second client-side simulation projection
- * and 15-second authoritative server tick synchronization interval.
+ * Starts the continuous client-side simulation projection
+ * and frequent authoritative server tick persistence.
  * 
  * Rules:
- * - Local 1-second projection is strictly for display/HUD/animation.
+ * - Local projection is strictly for display/HUD/animation.
  * - The browser client NEVER saves locally ticked values to the database.
- * - Periodic server sync fetches authoritative state and re-aligns local projection.
+ * - Periodic server sync writes elapsed ticks (× speed) and re-aligns local projection.
  */
 function startSimulationLoops(userId: string): void {
   stopSimulationLoops();
@@ -432,24 +432,29 @@ function startSimulationLoops(userId: string): void {
     }
   }, tickMs);
 
-  // 2. Authoritative server sync — more often at 2×/3× so sped-up ticks are written
-  const syncMs = Math.round(15000 / settings.speed);
-  serverSyncInterval = window.setInterval(async () => {
-    if (isUiPaused() || document.hidden) return;
-    if (store.getState().status !== 'active') {
-      stopSimulationLoops();
-      return;
+  // 2. Authoritative persist — every 2s so refresh reloads nearly the live tick count
+  const persistTicks = () => {
+    void runAuthoritativeSync(userId);
+  };
+  serverSyncTimeout = window.setTimeout(persistTicks, 1000);
+  serverSyncInterval = window.setInterval(persistTicks, 2000);
+}
+
+async function runAuthoritativeSync(userId: string): Promise<void> {
+  if (isUiPaused() || document.hidden) return;
+  if (store.getState().status !== 'active') {
+    stopSimulationLoops();
+    return;
+  }
+  if (activeColonyId && activeUserId === userId) {
+    try {
+      const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, liveSpeed());
+      store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+      maybeRunAutopilot();
+    } catch (err) {
+      console.warn('Authoritative periodic server tick sync failed:', err);
     }
-    if (activeColonyId && activeUserId === userId) {
-      try {
-        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, liveSpeed());
-        store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
-        maybeRunAutopilot();
-      } catch (err) {
-        console.warn('Authoritative periodic server tick sync failed:', err);
-      }
-    }
-  }, syncMs);
+  }
 }
 
 function stopSimulationLoops(): void {
@@ -457,13 +462,13 @@ function stopSimulationLoops(): void {
     clearInterval(clientProjectionInterval);
     clientProjectionInterval = null;
   }
+  if (serverSyncTimeout !== null) {
+    clearTimeout(serverSyncTimeout);
+    serverSyncTimeout = null;
+  }
   if (serverSyncInterval !== null) {
     clearInterval(serverSyncInterval);
     serverSyncInterval = null;
-  }
-  if (realtimeChannel) {
-    realtimeChannel.unsubscribe();
-    realtimeChannel = null;
   }
 }
 
@@ -498,12 +503,9 @@ document.addEventListener('visibilitychange', async () => {
 
   if (document.hidden) {
     stopSimulationLoops();
+    colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
     try {
-      if (isUiPaused()) {
-        await colonyService.updateLastTickTime(activeColonyId, activeUserId);
-      } else {
-        await flushAuthoritativeTicks();
-      }
+      await flushAuthoritativeTicks();
     } catch (err) {
       console.warn('Failed to flush ticks while hidden:', err);
     }
@@ -527,11 +529,13 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 window.addEventListener('pagehide', () => {
-  if (isUiPaused() && activeColonyId && activeUserId) {
-    void colonyService.updateLastTickTime(activeColonyId, activeUserId);
-    return;
-  }
-  void flushAuthoritativeTicks();
+  if (!activeColonyId || store.getState().status !== 'active') return;
+  colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
+});
+
+window.addEventListener('freeze', () => {
+  if (!activeColonyId || store.getState().status !== 'active') return;
+  colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
 });
 
 async function handleAuthStateChange(authState: AuthState): Promise<void> {
@@ -540,6 +544,10 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
   if (!authState.user) {
     // Unauthenticated
     stopSimulationLoops();
+    if (realtimeChannel) {
+      realtimeChannel.unsubscribe();
+      realtimeChannel = null;
+    }
     activeUserId = null;
     activeColonyId = null;
     activeUserDisplay = 'none';

@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase';
 import {
   Building,
   Colonist,
@@ -51,6 +51,16 @@ export interface ColonyData {
 
 export class ColonyService {
   private inFlightColonyLoads: Map<string, Promise<ColonyData>> = new Map();
+  private accessToken: string | null = null;
+
+  constructor() {
+    supabase.auth.onAuthStateChange((_event, session) => {
+      this.accessToken = session?.access_token ?? null;
+    });
+    void supabase.auth.getSession().then(({ data }) => {
+      this.accessToken = data.session?.access_token ?? this.accessToken;
+    });
+  }
 
   /**
    * Loads an existing colony for the authenticated user, or creates one if it's the first sign-in.
@@ -259,7 +269,7 @@ export class ColonyService {
             speed: options?.speed ?? 1,
           },
         });
-        if (!error && data && data.colonyData) {
+        if (!error && data?.colonyData && !data.error) {
           return data.colonyData as ColonyData;
         }
       } catch {
@@ -268,6 +278,33 @@ export class ColonyService {
     }
 
     return await executeAuthoritativeTick(supabase, colonyId, userId, options);
+  }
+
+  /**
+   * Best-effort tick persist that can outlive the page (refresh / close).
+   * Uses fetch keepalive so the request is not cancelled on unload.
+   */
+  public flushTicksKeepalive(colonyId: string, options?: AuthoritativeTickOptions): void {
+    const token = this.accessToken ?? SUPABASE_ANON_KEY;
+    if (!SUPABASE_URL || !token || !colonyId) return;
+    try {
+      void fetch(`${SUPABASE_URL}/functions/v1/tick`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          colonyId,
+          skipCatchUp: options?.skipCatchUp ?? false,
+          speed: options?.speed ?? 1,
+        }),
+        keepalive: true,
+      });
+    } catch {
+      // Unload persist is best-effort
+    }
   }
 
   /**
