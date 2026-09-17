@@ -6,30 +6,16 @@ export interface HelpModalOptions {
 }
 
 export class HelpModal {
-  private affordanceBtn: HTMLButtonElement;
   private modalOverlay: HTMLElement;
   private isOpen: boolean = false;
   private onOpenCallback?: () => void;
   private onCloseCallback?: () => void;
 
-  public static readonly AFFORDANCE_ID = 'help-btn';
   public static readonly MODAL_ID = 'help-modal';
 
   constructor(options?: HelpModalOptions) {
     this.onOpenCallback = options?.onOpen;
     this.onCloseCallback = options?.onClose;
-
-    let btn = document.getElementById(HelpModal.AFFORDANCE_ID) as HTMLButtonElement | null;
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = HelpModal.AFFORDANCE_ID;
-      btn.className = 'help-btn';
-      btn.type = 'button';
-      btn.setAttribute('aria-label', 'Open Colony Mission Help');
-      btn.textContent = '?';
-      document.body.appendChild(btn);
-    }
-    this.affordanceBtn = btn;
 
     let overlay = document.getElementById(HelpModal.MODAL_ID);
     if (!overlay) {
@@ -66,7 +52,6 @@ export class HelpModal {
     if (this.isOpen) return;
     this.isOpen = true;
     this.modalOverlay.style.display = 'flex';
-    this.affordanceBtn.classList.add('active');
     if (this.onOpenCallback) {
       this.onOpenCallback();
     }
@@ -76,7 +61,6 @@ export class HelpModal {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.modalOverlay.style.display = 'none';
-    this.affordanceBtn.classList.remove('active');
     if (this.onCloseCallback) {
       this.onCloseCallback();
     }
@@ -91,10 +75,6 @@ export class HelpModal {
   }
 
   private bindEvents(): void {
-    this.affordanceBtn.addEventListener('click', () => {
-      this.toggle();
-    });
-
     this.modalOverlay.addEventListener('click', (e) => {
       if (e.target === this.modalOverlay) {
         this.close();
@@ -128,7 +108,8 @@ export class HelpModal {
             <div class="help-section-title">1. SURVIVAL & LIFE SUPPORT</div>
             <div class="help-section-body">
               <p>• <strong>Starting Colony:</strong> 1 Starter Habitat at (7, 7), 1 Solar Array at (5, 7), 1 Scrubber at (9, 7), 2 Pioneer Colonists, 50 O2, 50 Power, 50 Food, 25 Ore, 2 Electronics (Emergency Spare Parts Kit), and 500 Ore across Martian terrain deposits.</p>
-              <p>• <strong>Workforce Capacity:</strong> Each living colonist supports up to <strong>4 operational structures</strong> (Habitats exempt). Expanding beyond 8 operational facilities requires recruiting more colonists via transport escorts.</p>
+              <p>• <strong>Workforce Capacity:</strong> Each living colonist supports up to <strong>5 operational structures</strong> (Habitats exempt). Expanding beyond 10 operational facilities requires recruiting more colonists via transport escorts.</p>
+              <p>• <strong>Construction:</strong> New structures are sites until a colonist walks adjacent and completes 10 ticks of on-site labor (faster than repairs). If a colonist is already next to the site, they work in place instead of walking away. Idle colonists spread across open sites. Starter buildings are already complete.</p>
               <p>• <strong>Consumption:</strong> Each colonist consumes <strong>3 O2</strong> and <strong>3 Food</strong> per tick.</p>
               <p>• <strong>Oxygen Storage:</strong> 100 base capacity + <strong>5 Max O2 per operational Scrubber</strong>.</p>
               <p>• <strong>Life Support Failure:</strong> If Oxygen, Power, or Food reaches 0, colonists lose <strong>-2 HP/tick</strong> (50-tick survival window). Recovers <strong>+1 HP/tick</strong> when all pools are positive.</p>

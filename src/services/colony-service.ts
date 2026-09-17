@@ -16,6 +16,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import {
   executeAuthoritativeTick,
   executeAuthoritativeAction,
+  AuthoritativeTickOptions,
 } from './server-simulation';
 import { CONTRACT_RULES } from '../simulation/contract-rules';
 
@@ -55,13 +56,16 @@ export class ColonyService {
    * Loads an existing colony for the authenticated user, or creates one if it's the first sign-in.
    * Performs authoritative server-side catch-up (capped at 28,800 ticks).
    */
-  public async loadOrCreateColony(userId: string): Promise<ColonyData> {
+  public async loadOrCreateColony(
+    userId: string,
+    tickOptions?: AuthoritativeTickOptions
+  ): Promise<ColonyData> {
     const existing = this.inFlightColonyLoads.get(userId);
     if (existing) {
       return existing;
     }
 
-    const loadPromise = this.performLoadOrCreateColony(userId);
+    const loadPromise = this.performLoadOrCreateColony(userId, tickOptions);
     this.inFlightColonyLoads.set(userId, loadPromise);
 
     try {
@@ -71,7 +75,10 @@ export class ColonyService {
     }
   }
 
-  private async performLoadOrCreateColony(userId: string): Promise<ColonyData> {
+  private async performLoadOrCreateColony(
+    userId: string,
+    tickOptions?: AuthoritativeTickOptions
+  ): Promise<ColonyData> {
     // 1. Fetch or create user account profile (best_sols_survived)
     const { data: userProfile } = await supabase
       .from('marscolony_users')
@@ -232,26 +239,35 @@ export class ColonyService {
     }
 
     // 3. Authoritative server tick execution on load (catch-up calculation and state persistence)
-    return await this.triggerServerTick(colonyId, userId);
+    return await this.triggerServerTick(colonyId, userId, tickOptions);
   }
 
   /**
    * Invokes the server-side authoritative tick calculation and state persistence route.
    */
-  public async triggerServerTick(colonyId: string, userId: string): Promise<ColonyData> {
-    try {
-      // Try invoking Edge Function first if available
-      const { data, error } = await supabase.functions.invoke('tick', {
-        body: { colonyId },
-      });
-      if (!error && data && data.colonyData) {
-        return data.colonyData as ColonyData;
+  public async triggerServerTick(
+    colonyId: string,
+    userId: string,
+    options?: AuthoritativeTickOptions
+  ): Promise<ColonyData> {
+    if (!import.meta.env.DEV) {
+      try {
+        const { data, error } = await supabase.functions.invoke('tick', {
+          body: {
+            colonyId,
+            skipCatchUp: options?.skipCatchUp ?? false,
+            speed: options?.speed ?? 1,
+          },
+        });
+        if (!error && data && data.colonyData) {
+          return data.colonyData as ColonyData;
+        }
+      } catch {
+        // Fall back to server simulation runner directly
       }
-    } catch {
-      // Fall back to server simulation runner directly
     }
 
-    return await executeAuthoritativeTick(supabase, colonyId, userId);
+    return await executeAuthoritativeTick(supabase, colonyId, userId, options);
   }
 
   /**
@@ -263,16 +279,17 @@ export class ColonyService {
     userId: string,
     action: SimulationAction
   ): Promise<{ success: boolean; reason?: string; colonyData: ColonyData }> {
-    try {
-      // Try invoking Edge Function first if available
-      const { data, error } = await supabase.functions.invoke('action', {
-        body: { colonyId, action },
-      });
-      if (!error && data && data.colonyData) {
-        return data as { success: boolean; reason?: string; colonyData: ColonyData };
+    if (!import.meta.env.DEV) {
+      try {
+        const { data, error } = await supabase.functions.invoke('action', {
+          body: { colonyId, action },
+        });
+        if (!error && data && data.colonyData) {
+          return data as { success: boolean; reason?: string; colonyData: ColonyData };
+        }
+      } catch {
+        // Fall back to server simulation runner directly
       }
-    } catch {
-      // Fall back to server simulation runner directly
     }
 
     return await executeAuthoritativeAction(supabase, colonyId, userId, action);

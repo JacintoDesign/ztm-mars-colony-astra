@@ -121,7 +121,7 @@ export function findNearestAvailableHabitat(
   buildings: Building[],
   currentColonists: Colonist[]
 ): Building | null {
-  const habitats = buildings.filter((b) => b.type === 'habitat');
+  const habitats = buildings.filter((b) => b.type === 'habitat' && b.condition !== 'constructing');
   if (habitats.length === 0) return null;
 
   // Count existing claims per habitat

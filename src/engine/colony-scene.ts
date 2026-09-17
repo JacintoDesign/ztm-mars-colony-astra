@@ -253,6 +253,15 @@ export class ColonyScene {
       const g = buildingModel(b.type, active, docked);
       this.at(g, b.x, b.y, 0.09);
       g.userData.buildingId = b.id;
+      if (b.condition === "constructing") {
+        g.traverse((o) => {
+          if (o instanceof T.Mesh && o.material instanceof T.MeshPhysicalMaterial) {
+            o.material.transparent = true;
+            o.material.opacity = 0.55;
+            o.material.depthWrite = false;
+          }
+        });
+      }
       // A deep foundation seats each facility into sloping terrain.
       box(g, palette.soil, 0, -0.14, 0, 0.94, 0.28, 0.94);
       if (b.condition === "buried")
@@ -446,6 +455,7 @@ export class ColonyScene {
     for (const building of state.buildings) {
       const status = building.condition === "broken" ? "broken" :
         building.condition === "buried" ? "buried" :
+        building.condition === "constructing" ? "constructing" :
         building.condition === "deactivated" || (state.power <= 0 && building.type !== "solar") ? "unpowered" : null;
       const anchor = this.statusAnchors.get(building.id);
       if (!status || !anchor) continue;
@@ -461,11 +471,13 @@ export class ColonyScene {
       if (badge.dataset.status !== status) {
         badge.dataset.status = status;
         badge.className = `building-status-badge building-status-${status}`;
-        const description = status === "unpowered" ? "No power" : status === "broken" ? "Broken — repair required" : "Buried — excavation required";
+        const description = status === "unpowered" ? "No power" : status === "broken" ? "Broken — repair required" : status === "constructing" ? "Under construction" : "Buried — excavation required";
         badge.setAttribute("aria-label", `${building.type}: ${description}`);
         badge.title = `${building.type}: ${description}`;
         const symbol = status === "unpowered"
           ? '<path d="M19 9 12 19h5l-2 7 9-11h-6l1-6Z" fill="currentColor"/><path d="m10 12 14 14" stroke="#201710" stroke-width="4"/><path d="m10 12 14 14" stroke="currentColor" stroke-width="2"/>'
+          : status === "constructing"
+            ? '<path d="M12 14h10v2H12zm0 4h7v2h-7z" fill="currentColor"/><path d="M11 12v10h2V12z" fill="currentColor"/>'
           : '<path d="M17 13v7" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/><circle cx="17" cy="25" r="1.6" fill="currentColor"/>';
         badge.innerHTML = `<svg viewBox="0 0 34 34" aria-hidden="true"><path d="M17 3 32 30H2Z" fill="#201710" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>${symbol}</svg>`;
       }

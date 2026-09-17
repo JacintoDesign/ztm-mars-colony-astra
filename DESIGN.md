@@ -169,9 +169,13 @@ Styled in the sci-fi terminal palette with crimson telemetry accents, displaying
 
 ## Help Modal
 
-Same palette and type as everything else — plain text, no imagery. Opens over the current view rather than replacing it, unlike the Game Over Screen; the colony keeps ticking underneath. A "?" affordance sits in the bottom-right corner at all times, closeable, available in any game state.
+Same palette and type as everything else — plain text, no imagery. Opens over the current view rather than replacing it, unlike the Game Over Screen. Opened from Settings via **OPEN MISSION MANUAL**.
 
-Worth being clear on why this is a second info panel and not one shared with the existing readout: the readout panel in the top-left corner exists for whatever is verifying the build — an agent, a browser check — and answers "what is the state right now." This one exists for the player and answers "what am I supposed to do." Different audience, different corner, never merged.
+## Settings Panel
+
+A cog affordance sits in the top-right corner while signed in, replacing the former "?" button. Opening it shows local session controls: time-passing-while-away (off by default), autopilot (off by default, remembered in localStorage), and speed 1×/2×/3× (1× default). A speed readout sits beside the cog in the main HUD at the same height as the cog and sign-in row; clicking it cycles speed. Shortcut labels stay in Settings: `[.]` cycles speed, `[S]` opens and closes Settings.
+
+Worth being clear on why this is a second info panel and not one shared with the existing readout: the readout panel in the top-left corner exists for whatever is verifying the build — an agent, a browser check — and answers "what is the state right now." The Help Modal exists for the player and answers "what am I supposed to do." Different audience, different corner, never merged.
 
 ## Do's and Don'ts
 

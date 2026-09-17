@@ -5,3 +5,4 @@
 .building-status-unpowered { color: #f0c84b; }
 .building-status-broken { color: #e45b4a; }
 .building-status-buried { color: #eb913c; }
+.building-status-constructing { color: #d9dde0; }

@@ -229,6 +229,10 @@ export class BuildingInspector {
     } else if (building.condition === 'buried') {
       conditionBadgeClass = 'inspector-status-buried';
       conditionText = 'BURIED (NEEDS EXCAVATION)';
+    } else if (building.condition === 'constructing') {
+      conditionBadgeClass = 'inspector-status-constructing';
+      const needed = CONTRACT_RULES.maintenance.constructionDurationTicks ?? 10;
+      conditionText = `CONSTRUCTING (${building.repairProgress}/${needed} TICKS)`;
     }
 
     let statsHtml = '';
@@ -267,6 +271,7 @@ export class BuildingInspector {
     const isOperational = building.condition === 'operational';
     const isBroken = building.condition === 'broken';
     const isBuried = building.condition === 'buried';
+    const isConstructing = building.condition === 'constructing';
     const canToggle = isOperational || isDeactivated;
     const hasEnoughElec = state.electronics >= reqElectronics;
 
@@ -290,6 +295,12 @@ export class BuildingInspector {
       maintenanceActionHtml = `
         <button type="button" class="inspector-btn inspector-btn-dig" id="inspector-dispatch-maintenance">
           <span class="btn-icon">⛏</span> DISPATCH EXCAVATION (40 TICKS)
+        </button>
+      `;
+    } else if (isConstructing) {
+      maintenanceActionHtml = `
+        <button type="button" class="inspector-btn inspector-btn-repair" id="inspector-dispatch-maintenance">
+          <span class="btn-icon">🔧</span> DISPATCH BUILD CREW
         </button>
       `;
     }
@@ -352,7 +363,7 @@ export class BuildingInspector {
                 : ''
             }
 
-            <button type="button" class="inspector-btn inspector-btn-relocate" id="inspector-relocate" ${state.power < 10 || isBroken || isBuried ? 'disabled' : ''}>
+            <button type="button" class="inspector-btn inspector-btn-relocate" id="inspector-relocate" ${state.power < 10 || isBroken || isBuried || isConstructing ? 'disabled' : ''}>
               <span class="btn-icon">✥</span> RELOCATE (10 PWR)
               <span class="btn-shortcut">[M]</span>
             </button>

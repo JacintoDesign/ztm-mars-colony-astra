@@ -19,9 +19,9 @@ export type BuildingType =
   | 'garage'
   | 'refinery';
 
-export type BuildingCondition = 'operational' | 'broken' | 'buried' | 'deactivated';
+export type BuildingCondition = 'operational' | 'broken' | 'buried' | 'deactivated' | 'constructing';
 
-export type ColonistDestinationType = 'habitat' | 'repair' | 'dig' | 'rover_recovery';
+export type ColonistDestinationType = 'habitat' | 'repair' | 'dig' | 'rover_recovery' | 'construct';
 
 export type RoverState = 'idle_at_base' | 'traveling_out' | 'on_site' | 'traveling_back' | 'stranded';
 
@@ -235,6 +235,7 @@ export const CONTRACT_RULES = {
     dustStormChance: 0.30,
     maxBuriedPerStorm: 2,
     digOutDurationTicks: 40,
+    constructionDurationTicks: 10,
   },
   spacing: {
     maxAdjacentForFullEfficiency: 1,
@@ -262,7 +263,7 @@ export const CONTRACT_RULES = {
     maxYield: 120,
   },
   workforce: {
-    operationalBuildingsPerColonist: 4,
+    operationalBuildingsPerColonist: 5,
   },
   demolition: {
     costPower: 10,
@@ -362,6 +363,66 @@ export const CONTRACT_RULES = {
     },
   },
 } as const;
+
+function countsTowardWorkforceCap(building: {
+  type: BuildingType;
+  condition: BuildingCondition;
+}): boolean {
+  return (
+    building.type !== 'habitat' &&
+    (building.condition === 'operational' || building.condition === 'constructing')
+  );
+}
+
+const CONSTRUCTION_DIG_OFFSET = 1000;
+
+function buildingFromRow(row: any): Building {
+  const dig = row.dig_progress ?? 0;
+  if (row.condition === 'constructing' || (row.condition === 'operational' && dig >= CONSTRUCTION_DIG_OFFSET)) {
+    return {
+      id: row.id,
+      type: row.type as BuildingType,
+      x: row.x,
+      y: row.y,
+      condition: 'constructing',
+      repairProgress: row.condition === 'constructing' ? (row.repair_progress ?? 0) : dig - CONSTRUCTION_DIG_OFFSET,
+      digProgress: row.condition === 'constructing' ? dig : 0,
+      wasBrokenBeforeBurial: false,
+    };
+  }
+  return {
+    id: row.id,
+    type: row.type as BuildingType,
+    x: row.x,
+    y: row.y,
+    condition: (row.condition as BuildingCondition) ?? 'operational',
+    repairProgress: row.repair_progress ?? 0,
+    digProgress: dig,
+    wasBrokenBeforeBurial: row.was_broken_before_burial ?? false,
+  };
+}
+
+function buildingPersistFields(building: Building) {
+  if (building.condition === 'constructing') {
+    return {
+      condition: 'operational',
+      repair_progress: 0,
+      dig_progress: CONSTRUCTION_DIG_OFFSET + building.repairProgress,
+      was_broken_before_burial: false,
+    };
+  }
+  return {
+    condition: building.condition,
+    repair_progress: building.repairProgress,
+    dig_progress: building.digProgress,
+    was_broken_before_burial: building.wasBrokenBeforeBurial ?? false,
+  };
+}
+
+function persistableDestinationType(destinationType: string | null): string | null {
+  if (destinationType === 'construct') return 'repair';
+  return destinationType;
+}
 
 export const BUILDING_COSTS: Record<BuildingType, BuildingCost> = {
   habitat: { ...CONTRACT_RULES.buildings.habitat.cost },
@@ -514,7 +575,7 @@ export function findNearestAvailableHabitat(
   buildings: Building[],
   currentColonists: Colonist[]
 ): Building | null {
-  const habitats = buildings.filter((b) => b.type === 'habitat');
+  const habitats = buildings.filter((b) => b.type === 'habitat' && b.condition !== 'constructing');
   if (habitats.length === 0) return null;
 
   const claims = new Map<string, number>();
@@ -633,6 +694,63 @@ export function generateOreDistribution(prng: SeededPRNG, gridSize = 20): {
   return { oreDeposits, miningSites };
 }
 
+function isAdjacentOrOnSite(cx: number, cy: number, tx: number, ty: number): boolean {
+  return Math.abs(cx - tx) + Math.abs(cy - ty) <= 1;
+}
+
+function routeToLaborSite(
+  colonist: Colonist,
+  target: { x: number; y: number },
+  blockedTiles: Set<string>
+): { x: number; y: number }[] {
+  if (isAdjacentOrOnSite(colonist.x, colonist.y, target.x, target.y)) return [];
+  const goalTiles = getFreeAdjacentTiles({ x: target.x, y: target.y }, blockedTiles, 20);
+  if (goalTiles.some((g) => g.x === colonist.x && g.y === colonist.y)) return [];
+  return findShortestRoute(
+    { x: colonist.x, y: colonist.y },
+    goalTiles.length > 0 ? goalTiles : [{ x: target.x, y: target.y }],
+    blockedTiles,
+    20
+  );
+}
+
+function completeConstruction(
+  building: Building,
+  tick: number,
+  rovers: Rover[],
+  batteryCells: BatteryCell[]
+): void {
+  building.condition = 'operational';
+  building.repairProgress = 0;
+  if (building.type !== 'garage') return;
+
+  const existingForGarage = rovers.filter(
+    (r) => r.garageX === building.x && r.garageY === building.y
+  ).length;
+  const toSpawn = CONTRACT_RULES.rovers.maxRoversPerGarage - existingForGarage;
+  for (let i = 0; i < toSpawn; i++) {
+    rovers.push({
+      id: `rov-${tick}-${building.id}-${i}`,
+      garageX: building.x,
+      garageY: building.y,
+      x: building.x,
+      y: building.y,
+      state: 'idle_at_base',
+      power: CONTRACT_RULES.rovers.powerMax,
+      cargo: null,
+      destination: null,
+      onSiteTicksRemaining: 0,
+      route: [],
+    });
+  }
+  if (batteryCells.length === 0) {
+    batteryCells.push(
+      { id: `cell-${tick}-1`, efficiency: CONTRACT_RULES.refinery.initialCellEfficiency },
+      { id: `cell-${tick}-2`, efficiency: CONTRACT_RULES.refinery.initialCellEfficiency }
+    );
+  }
+}
+
 export function applySingleTick(state: ColonyState): ColonyState {
   if (state.status === 'game_over') {
     return state;
@@ -646,10 +764,12 @@ export function applySingleTick(state: ColonyState): ColonyState {
   let updatedBuildings: Building[] = state.buildings.map((b) => ({ ...b }));
   if (nextTick >= (mSpecs.minDustStormTick ?? 2500) && nextTick % mSpecs.dustStormWindowTicks === 0) {
     if (prng.chance(mSpecs.dustStormChance)) {
-      const unburiedBuildings = updatedBuildings.filter((b) => b.condition !== 'buried');
+      const unburiedBuildings = updatedBuildings.filter(
+        (b) => b.condition !== 'buried' && b.condition !== 'constructing'
+      );
       const numToBury = Math.min(mSpecs.maxBuriedPerStorm, unburiedBuildings.length);
       for (let i = 0; i < numToBury; i++) {
-        const target = prng.pick(updatedBuildings.filter((b) => b.condition !== 'buried'));
+        const target = prng.pick(updatedBuildings.filter((b) => b.condition !== 'buried' && b.condition !== 'constructing'));
         if (target) {
           target.wasBrokenBeforeBurial = target.condition === 'broken' || Boolean(target.wasBrokenBeforeBurial);
           target.condition = 'buried';
@@ -692,7 +812,9 @@ export function applySingleTick(state: ColonyState): ColonyState {
 
   // 4. Colonist Arrivals
   let updatedPendingArrivals: PendingArrival[] = state.pendingArrivals.map((p) => ({ ...p }));
-  const totalHabitats = updatedBuildings.filter((b) => b.type === 'habitat').length;
+  const totalHabitats = updatedBuildings.filter(
+    (b) => b.type === 'habitat' && b.condition !== 'constructing'
+  ).length;
   const totalHabitatCapacity = totalHabitats * bSpecs.habitat.capacity;
   const totalPopulation = state.colonists.length + updatedPendingArrivals.length;
 
@@ -846,17 +968,53 @@ export function applySingleTick(state: ColonyState): ColonyState {
 
   const buriedBuildings = updatedBuildings.filter((b) => b.condition === 'buried');
   const brokenBuildings = updatedBuildings.filter((b) => b.condition === 'broken');
+  const constructingBuildings = updatedBuildings.filter((b) => b.condition === 'constructing');
   const strandedRovers = updatedRovers.filter((r) => r.state === 'stranded');
+  const constructStaff = new Map<string, number>();
+  for (const c of currentColonists) {
+    if (c.destinationType === 'construct' && c.targetEntityId) {
+      constructStaff.set(c.targetEntityId, (constructStaff.get(c.targetEntityId) ?? 0) + 1);
+    }
+  }
+
+  const pickConstructSite = (colonist: Colonist): Building | undefined => {
+    if (constructingBuildings.length === 0) return undefined;
+    const ranked = [...constructingBuildings].sort((a, b) => {
+      const staffDelta = (constructStaff.get(a.id) ?? 0) - (constructStaff.get(b.id) ?? 0);
+      if (staffDelta !== 0) return staffDelta;
+      return Math.hypot(a.x - colonist.x, a.y - colonist.y) - Math.hypot(b.x - colonist.x, b.y - colonist.y);
+    });
+    return ranked[0];
+  };
 
   currentColonists = currentColonists.map((c) => {
     let colonist = { ...c };
     colonist.age += 1;
 
     const isEngagedInMaintenance =
-      (colonist.destinationType === 'dig' || colonist.destinationType === 'repair' || colonist.destinationType === 'rover_recovery') &&
+      (colonist.destinationType === 'dig' ||
+        colonist.destinationType === 'repair' ||
+        colonist.destinationType === 'rover_recovery' ||
+        colonist.destinationType === 'construct') &&
       colonist.targetEntityId !== null;
 
-    if (!isEngagedInMaintenance) {
+    if (
+      colonist.destinationType === 'construct' &&
+      colonist.targetEntityId &&
+      constructingBuildings.length > 1
+    ) {
+      const myStaff = constructStaff.get(colonist.targetEntityId) ?? 0;
+      const unstaffed = constructingBuildings.filter((b) => (constructStaff.get(b.id) ?? 0) === 0);
+      if (myStaff > 1 && unstaffed.length > 0) {
+        constructStaff.set(colonist.targetEntityId, myStaff - 1);
+        colonist.destinationType = null;
+        colonist.targetEntityId = null;
+        colonist.destination = null;
+        colonist.route = [];
+      }
+    }
+
+    if (!isEngagedInMaintenance || colonist.destinationType === null) {
       if (buriedBuildings.length > 0) {
         const target = buriedBuildings[0];
         const goalTiles = getFreeAdjacentTiles({ x: target.x, y: target.y }, blockedTiles, 20);
@@ -884,6 +1042,15 @@ export function applySingleTick(state: ColonyState): ColonyState {
             20
           );
         }
+      } else if (constructingBuildings.length > 0) {
+        const target = pickConstructSite(colonist);
+        if (target) {
+          constructStaff.set(target.id, (constructStaff.get(target.id) ?? 0) + 1);
+          colonist.destination = { x: target.x, y: target.y };
+          colonist.destinationType = 'construct';
+          colonist.targetEntityId = target.id;
+          colonist.route = routeToLaborSite(colonist, target, blockedTiles);
+        }
       } else if (strandedRovers.length > 0) {
         const target = strandedRovers[0];
         const goalTiles = getFreeAdjacentTiles({ x: target.x, y: target.y }, blockedTiles, 20);
@@ -909,7 +1076,20 @@ export function applySingleTick(state: ColonyState): ColonyState {
       }
     }
 
-    if (colonist.route.length > 0) {
+    const alreadyInLaborRange =
+      Boolean(colonist.destination) &&
+      colonist.destinationType !== 'habitat' &&
+      isAdjacentOrOnSite(
+        colonist.x,
+        colonist.y,
+        colonist.destination!.x,
+        colonist.destination!.y
+      );
+
+    if (alreadyInLaborRange) {
+      colonist.route = [];
+      colonist.moveProgress = 0;
+    } else if (colonist.route.length > 0) {
       colonist.moveProgress = (colonist.moveProgress ?? 0) + 1;
       if (colonist.moveProgress >= cSpecs.ticksPerTile) {
         colonist.moveProgress = 0;
@@ -919,7 +1099,6 @@ export function applySingleTick(state: ColonyState): ColonyState {
           colonist.y = nextStep.y;
           colonist.route = colonist.route.slice(1);
 
-          // If colonist is towing a stranded rover back to garage, update rover position alongside colonist
           if (colonist.destinationType === 'rover_recovery' && colonist.targetEntityId) {
             const r = updatedRovers.find((rov) => rov.id === colonist.targetEntityId);
             if (r && r.state === 'stranded' && colonist.destination && (colonist.destination.x === r.garageX && colonist.destination.y === r.garageY)) {
@@ -932,10 +1111,6 @@ export function applySingleTick(state: ColonyState): ColonyState {
     } else {
       colonist.moveProgress = 0;
     }
-
-    const isAdjacentOrOnSite = (cx: number, cy: number, tx: number, ty: number) => {
-      return Math.abs(cx - tx) + Math.abs(cy - ty) <= 1;
-    };
 
     if (colonist.destination) {
       if (colonist.destinationType === 'dig' && colonist.targetEntityId) {
@@ -978,6 +1153,25 @@ export function applySingleTick(state: ColonyState): ColonyState {
                 colonist.destinationType = null;
                 colonist.targetEntityId = null;
               }
+            }
+          }
+        } else {
+          colonist.destination = null;
+          colonist.destinationType = null;
+          colonist.targetEntityId = null;
+        }
+      } else if (colonist.destinationType === 'construct' && colonist.targetEntityId) {
+        const b = updatedBuildings.find((bld) => bld.id === colonist.targetEntityId);
+        if (b && b.condition === 'constructing') {
+          if (isAdjacentOrOnSite(colonist.x, colonist.y, b.x, b.y)) {
+            b.repairProgress += 1;
+            const requiredTicks = mSpecs.constructionDurationTicks ?? 10;
+            if (b.repairProgress >= requiredTicks) {
+              completeConstruction(b, nextTick, updatedRovers, updatedBatteryCells);
+              colonist.destination = null;
+              colonist.destinationType = null;
+              colonist.targetEntityId = null;
+              colonist.route = [];
             }
           }
         } else {
@@ -1168,7 +1362,8 @@ export function applyTicks(state: ColonyState, nTicks: number): ColonyState {
 export async function executeAuthoritativeTick(
   client: any,
   colonyId: string,
-  userId: string
+  userId: string,
+  options?: { skipCatchUp?: boolean; speed?: number }
 ): Promise<ColonyData> {
   let bestSolsSurvived = 0;
   const { data: userProfile } = await client
@@ -1200,16 +1395,7 @@ export async function executeAuthoritativeTick(
     .eq('colony_id', colonyId)
     .order('created_at', { ascending: true });
 
-  const buildings: Building[] = (buildingsData || []).map((b: any) => ({
-    id: b.id,
-    type: b.type as BuildingType,
-    x: b.x,
-    y: b.y,
-    condition: b.condition ?? 'operational',
-    repairProgress: b.repair_progress ?? 0,
-    digProgress: b.dig_progress ?? 0,
-    wasBrokenBeforeBurial: b.was_broken_before_burial ?? false,
-  }));
+  const buildings: Building[] = (buildingsData || []).map((b: any) => buildingFromRow(b));
 
   const { data: colonistsData } = await client
     .from('marscolony_colonists')
@@ -1281,10 +1467,29 @@ export async function executeAuthoritativeTick(
     };
   }
 
+  if (options?.skipCatchUp) {
+    const nowIso = new Date().toISOString();
+    await client
+      .from('marscolony_colonies')
+      .update({ last_tick_at: nowIso, updated_at: nowIso })
+      .eq('id', colonyId)
+      .eq('owner', userId);
+    colony.last_tick_at = nowIso;
+    return {
+      colony,
+      buildings,
+      colonists,
+      rovers,
+      oreDeposits,
+      bestSolsSurvived,
+    };
+  }
+
+  const speed = Math.max(1, Math.min(3, Math.floor(options?.speed ?? 1)));
   const lastTickTime = colony.last_tick_at ? new Date(colony.last_tick_at).getTime() : Date.now();
   const now = Date.now();
   const elapsedSeconds = Math.max(0, Math.floor((now - lastTickTime) / 1000));
-  const ticksToApply = Math.min(elapsedSeconds, CONTRACT_RULES.maxCatchUpTicks);
+  const ticksToApply = Math.min(elapsedSeconds * speed, CONTRACT_RULES.maxCatchUpTicks);
 
   if (colony.status === 'active' && ticksToApply > 0) {
     const currentState: ColonyState = {
@@ -1372,12 +1577,7 @@ export async function executeAuthoritativeTick(
       if (b.id && !b.id.startsWith('bld-')) {
         await client
           .from('marscolony_buildings')
-          .update({
-            condition: b.condition,
-            repair_progress: b.repairProgress,
-            dig_progress: b.digProgress,
-            was_broken_before_burial: b.wasBrokenBeforeBurial ?? false,
-          })
+          .update(buildingPersistFields(b))
           .eq('id', b.id);
       }
     }
@@ -1397,7 +1597,7 @@ export async function executeAuthoritativeTick(
             age: c.age,
             lifespan: c.lifespan,
             destination: c.destination,
-            destination_type: c.destinationType,
+            destination_type: persistableDestinationType(c.destinationType),
             route: c.route || [],
           })
           .eq('id', c.id);
@@ -1422,7 +1622,7 @@ export async function executeAuthoritativeTick(
           age: c.age,
           lifespan: c.lifespan,
           destination: c.destination,
-          destination_type: c.destinationType,
+            destination_type: persistableDestinationType(c.destinationType),
           route: c.route || [],
         }));
         const { data: insertedCols } = await client.from('marscolony_colonists').insert(colRows).select();
@@ -1562,9 +1762,7 @@ export async function executeAuthoritativeAction(
       }
 
       if (buildingType !== 'habitat') {
-        const operationalBuildingsCount = buildings.filter(
-          (b) => b.type !== 'habitat' && b.condition === 'operational'
-        ).length;
+        const operationalBuildingsCount = buildings.filter(countsTowardWorkforceCap).length;
         const maxOperationalAllowed = livingColonists * CONTRACT_RULES.workforce.operationalBuildingsPerColonist;
         if (operationalBuildingsCount >= maxOperationalAllowed) {
           const requiredColonists = Math.ceil((operationalBuildingsCount + 1) / CONTRACT_RULES.workforce.operationalBuildingsPerColonist);
@@ -1603,6 +1801,17 @@ export async function executeAuthoritativeAction(
         .eq('id', colonyId)
         .eq('owner', userId);
 
+      const persist = buildingPersistFields({
+        id: 'pending',
+        type: buildingType,
+        x,
+        y,
+        condition: 'constructing',
+        repairProgress: 0,
+        digProgress: 0,
+        wasBrokenBeforeBurial: false,
+      });
+
       const { data: bldRecord, error: bldErr } = await client
         .from('marscolony_buildings')
         .insert({
@@ -1611,98 +1820,31 @@ export async function executeAuthoritativeAction(
           type: buildingType,
           x,
           y,
-          condition: 'operational',
-          repair_progress: 0,
-          dig_progress: 0,
-          was_broken_before_burial: false,
+          ...persist,
         })
         .select()
         .single();
 
       if (bldErr) {
+        await client
+          .from('marscolony_colonies')
+          .update({
+            power: colony.power,
+            ore: colony.ore,
+            electronics: colony.electronics,
+          })
+          .eq('id', colonyId)
+          .eq('owner', userId);
         return { success: false, reason: bldErr.message, colonyData: currentData };
       }
 
-      const newBuilding: Building = {
-        id: bldRecord.id,
-        type: bldRecord.type as BuildingType,
-        x: bldRecord.x,
-        y: bldRecord.y,
-        condition: 'operational',
-        repairProgress: 0,
-        digProgress: 0,
-        wasBrokenBeforeBurial: false,
-      };
+      const newBuilding: Building = buildingFromRow(bldRecord);
 
       const updatedBuildings = [...buildings, newBuilding];
-      let updatedRovers = [...rovers];
-
-      if (buildingType === 'garage') {
-        const roverRows = [
-          {
-            colony_id: colonyId,
-            owner: userId,
-            garage_x: x,
-            garage_y: y,
-            x,
-            y,
-            state: 'idle_at_base',
-            power: CONTRACT_RULES.rovers.powerMax,
-            cargo: null,
-            destination: null,
-            route: [],
-          },
-          {
-            colony_id: colonyId,
-            owner: userId,
-            garage_x: x,
-            garage_y: y,
-            x,
-            y,
-            state: 'idle_at_base',
-            power: CONTRACT_RULES.rovers.powerMax,
-            cargo: null,
-            destination: null,
-            route: [],
-          },
-        ];
-        const { data: insertedRovers } = await client.from('marscolony_rovers').insert(roverRows).select();
-        if (insertedRovers) {
-          for (const r of insertedRovers) {
-            updatedRovers.push({
-              id: r.id,
-              garageX: r.garage_x,
-              garageY: r.garage_y,
-              x: r.x,
-              y: r.y,
-              state: r.state,
-              power: r.power,
-              cargo: r.cargo,
-              destination: r.destination,
-              onSiteTicksRemaining: 0,
-              route: r.route || [],
-            });
-          }
-        }
-      }
-
-      let updatedBatteryCells = colony.battery_cells || [];
-      if (buildingType === 'garage' && updatedBatteryCells.length === 0) {
-        updatedBatteryCells = [
-          { id: `cell-${Date.now()}-1`, efficiency: 100 },
-          { id: `cell-${Date.now()}-2`, efficiency: 100 },
-        ];
-        await client
-          .from('marscolony_colonies')
-          .update({ battery_cells: updatedBatteryCells })
-          .eq('id', colonyId)
-          .eq('owner', userId);
-      }
 
       colony.power = newPower;
       colony.ore = newOre;
       colony.electronics = newElectronics;
-      colony.battery_cells = updatedBatteryCells;
       colony.last_tick_at = nowIso;
 
       return {
@@ -1711,7 +1853,6 @@ export async function executeAuthoritativeAction(
           ...currentData,
           colony,
           buildings: updatedBuildings,
-          rovers: updatedRovers,
         },
       };
     }
@@ -1857,7 +1998,7 @@ export async function executeAuthoritativeAction(
       }
 
       const bld = buildings[bIndex];
-      if (bld.condition === 'broken' || bld.condition === 'buried') {
+      if (bld.condition === 'broken' || bld.condition === 'buried' || bld.condition === 'constructing') {
         return { success: false, reason: 'Cannot toggle broken/buried building', colonyData: currentData };
       }
 
@@ -1886,7 +2027,7 @@ export async function executeAuthoritativeAction(
       }
 
       const bld = buildings[bIndex];
-      if (bld.condition === 'broken' || bld.condition === 'buried') {
+      if (bld.condition === 'broken' || bld.condition === 'buried' || bld.condition === 'constructing') {
         return { success: false, reason: 'Cannot move broken/buried building', colonyData: currentData };
       }
       const targetX = (action as any).targetX ?? (action as any).newX;
@@ -1981,13 +2122,13 @@ export async function executeAuthoritativeAction(
         20
       );
 
-      const destType = bld.condition === 'buried' ? 'dig' : 'repair';
+      const destType = bld.condition === 'buried' ? 'dig' : bld.condition === 'constructing' ? 'construct' : 'repair';
 
       await client
         .from('marscolony_colonists')
         .update({
           destination: { x: bld.x, y: bld.y },
-          destination_type: destType,
+          destination_type: persistableDestinationType(destType),
           target_entity_id: bld.id,
           route,
         })

@@ -5,6 +5,7 @@ export * from './header-bar';
 export * from './game-over-modal';
 export * from './resource-panel';
 export * from './help-modal';
+export * from './game-settings';
 export * from './telemetry-banner';
 export * from './building-inspector';
 export * from './mission-advisor';

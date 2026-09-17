@@ -16,6 +16,63 @@ import {
   getFreeAdjacentTiles,
 } from './pathfinding';
 
+function isAdjacentOrOnSite(cx: number, cy: number, tx: number, ty: number): boolean {
+  return Math.abs(cx - tx) + Math.abs(cy - ty) <= 1;
+}
+
+function routeToLaborSite(
+  colonist: Colonist,
+  target: { x: number; y: number },
+  blockedTiles: Set<string>
+): { x: number; y: number }[] {
+  if (isAdjacentOrOnSite(colonist.x, colonist.y, target.x, target.y)) return [];
+  const goalTiles = getFreeAdjacentTiles({ x: target.x, y: target.y }, blockedTiles, 20);
+  if (goalTiles.some((g) => g.x === colonist.x && g.y === colonist.y)) return [];
+  return findShortestRoute(
+    { x: colonist.x, y: colonist.y },
+    goalTiles.length > 0 ? goalTiles : [{ x: target.x, y: target.y }],
+    blockedTiles,
+    20
+  );
+}
+
+function completeConstruction(
+  building: Building,
+  tick: number,
+  rovers: Rover[],
+  batteryCells: BatteryCell[]
+): void {
+  building.condition = 'operational';
+  building.repairProgress = 0;
+  if (building.type !== 'garage') return;
+
+  const existingForGarage = rovers.filter(
+    (r) => r.garageX === building.x && r.garageY === building.y
+  ).length;
+  const toSpawn = CONTRACT_RULES.rovers.maxRoversPerGarage - existingForGarage;
+  for (let i = 0; i < toSpawn; i++) {
+    rovers.push({
+      id: `rov-${tick}-${building.id}-${i}`,
+      garageX: building.x,
+      garageY: building.y,
+      x: building.x,
+      y: building.y,
+      state: 'idle_at_base',
+      power: CONTRACT_RULES.rovers.powerMax,
+      cargo: null,
+      destination: null,
+      onSiteTicksRemaining: 0,
+      route: [],
+    });
+  }
+  if (batteryCells.length === 0) {
+    batteryCells.push(
+      { id: `cell-${tick}-1`, efficiency: CONTRACT_RULES.refinery.initialCellEfficiency },
+      { id: `cell-${tick}-2`, efficiency: CONTRACT_RULES.refinery.initialCellEfficiency }
+    );
+  }
+}
+
 /**
  * Pure function to apply a single simulation tick.
  * Strictly adheres to CONTRACT.md Tier 3 specifications, seeded determinism,
@@ -35,10 +92,12 @@ export function applySingleTick(state: ColonyState): ColonyState {
   let updatedBuildings: Building[] = state.buildings.map((b) => ({ ...b }));
   if (nextTick >= (mSpecs.minDustStormTick ?? 2500) && nextTick % mSpecs.dustStormWindowTicks === 0) {
     if (prng.chance(mSpecs.dustStormChance)) {
-      const unburiedBuildings = updatedBuildings.filter((b) => b.condition !== 'buried');
+      const unburiedBuildings = updatedBuildings.filter(
+        (b) => b.condition !== 'buried' && b.condition !== 'constructing'
+      );
       const numToBury = Math.min(mSpecs.maxBuriedPerStorm, unburiedBuildings.length);
       for (let i = 0; i < numToBury; i++) {
-        const target = prng.pick(updatedBuildings.filter((b) => b.condition !== 'buried'));
+        const target = prng.pick(updatedBuildings.filter((b) => b.condition !== 'buried' && b.condition !== 'constructing'));
         if (target) {
           target.wasBrokenBeforeBurial = target.condition === 'broken' || Boolean(target.wasBrokenBeforeBurial);
           target.condition = 'buried';
@@ -82,7 +141,9 @@ export function applySingleTick(state: ColonyState): ColonyState {
   // 4. Colonist Arrivals & Pending Arrivals Queue
   // Ship lands every 300 ticks if population < total habitat capacity
   let updatedPendingArrivals: PendingArrival[] = state.pendingArrivals.map((p) => ({ ...p }));
-  const totalHabitats = updatedBuildings.filter((b) => b.type === 'habitat').length;
+  const totalHabitats = updatedBuildings.filter(
+    (b) => b.type === 'habitat' && b.condition !== 'constructing'
+  ).length;
   const totalHabitatCapacity = totalHabitats * bSpecs.habitat.capacity;
   const totalPopulation = state.colonists.length + updatedPendingArrivals.length;
 
@@ -250,7 +311,24 @@ export function applySingleTick(state: ColonyState): ColonyState {
   // Find maintenance targets
   const buriedBuildings = updatedBuildings.filter((b) => b.condition === 'buried');
   const brokenBuildings = updatedBuildings.filter((b) => b.condition === 'broken');
+  const constructingBuildings = updatedBuildings.filter((b) => b.condition === 'constructing');
   const strandedRovers = updatedRovers.filter((r) => r.state === 'stranded');
+  const constructStaff = new Map<string, number>();
+  for (const c of currentColonists) {
+    if (c.destinationType === 'construct' && c.targetEntityId) {
+      constructStaff.set(c.targetEntityId, (constructStaff.get(c.targetEntityId) ?? 0) + 1);
+    }
+  }
+
+  const pickConstructSite = (colonist: Colonist): Building | undefined => {
+    if (constructingBuildings.length === 0) return undefined;
+    const ranked = [...constructingBuildings].sort((a, b) => {
+      const staffDelta = (constructStaff.get(a.id) ?? 0) - (constructStaff.get(b.id) ?? 0);
+      if (staffDelta !== 0) return staffDelta;
+      return Math.hypot(a.x - colonist.x, a.y - colonist.y) - Math.hypot(b.x - colonist.x, b.y - colonist.y);
+    });
+    return ranked[0];
+  };
 
   currentColonists = currentColonists.map((c) => {
     let colonist = { ...c };
@@ -260,10 +338,29 @@ export function applySingleTick(state: ColonyState): ColonyState {
 
     // Check if colonist needs an automated assignment
     const isEngagedInMaintenance =
-      (colonist.destinationType === 'dig' || colonist.destinationType === 'repair' || colonist.destinationType === 'rover_recovery') &&
+      (colonist.destinationType === 'dig' ||
+        colonist.destinationType === 'repair' ||
+        colonist.destinationType === 'rover_recovery' ||
+        colonist.destinationType === 'construct') &&
       colonist.targetEntityId !== null;
 
-    if (!isEngagedInMaintenance) {
+    if (
+      colonist.destinationType === 'construct' &&
+      colonist.targetEntityId &&
+      constructingBuildings.length > 1
+    ) {
+      const myStaff = constructStaff.get(colonist.targetEntityId) ?? 0;
+      const unstaffed = constructingBuildings.filter((b) => (constructStaff.get(b.id) ?? 0) === 0);
+      if (myStaff > 1 && unstaffed.length > 0) {
+        constructStaff.set(colonist.targetEntityId, myStaff - 1);
+        colonist.destinationType = null;
+        colonist.targetEntityId = null;
+        colonist.destination = null;
+        colonist.route = [];
+      }
+    }
+
+    if (!isEngagedInMaintenance || colonist.destinationType === null) {
       // 1. Digging out buried buildings (find nearest)
       if (buriedBuildings.length > 0) {
         const sortedBuried = [...buriedBuildings].sort(
@@ -303,7 +400,18 @@ export function applySingleTick(state: ColonyState): ColonyState {
           );
         }
       }
-      // 3. Recovering stranded rovers (find nearest)
+      // 3. Walking to unfinished construction sites (spread across open sites)
+      else if (constructingBuildings.length > 0) {
+        const target = pickConstructSite(colonist);
+        if (target) {
+          constructStaff.set(target.id, (constructStaff.get(target.id) ?? 0) + 1);
+          colonist.destination = { x: target.x, y: target.y };
+          colonist.destinationType = 'construct';
+          colonist.targetEntityId = target.id;
+          colonist.route = routeToLaborSite(colonist, target, blockedTiles);
+        }
+      }
+      // 4. Recovering stranded rovers (find nearest)
       else if (strandedRovers.length > 0) {
         const sortedStranded = [...strandedRovers].sort(
           (a, b) => Math.hypot(a.x - colonist.x, a.y - colonist.y) - Math.hypot(b.x - colonist.x, b.y - colonist.y)
@@ -320,7 +428,7 @@ export function applySingleTick(state: ColonyState): ColonyState {
           20
         );
       }
-      // 4. Habitat home assignment
+      // 5. Habitat home assignment
       else if (colonist.destinationType !== 'habitat' || !colonist.destination) {
         const targetHabitat = findNearestAvailableHabitat({ x: colonist.x, y: colonist.y }, updatedBuildings, currentColonists);
         if (targetHabitat) {
@@ -334,8 +442,21 @@ export function applySingleTick(state: ColonyState): ColonyState {
       }
     }
 
-    // Advance 1 step along route every 5 ticks (0.2 tiles/tick)
-    if (colonist.route.length > 0) {
+    // Advance along route only when not already in labor range — never walk off a workable tile.
+    const alreadyInLaborRange =
+      Boolean(colonist.destination) &&
+      colonist.destinationType !== 'habitat' &&
+      isAdjacentOrOnSite(
+        colonist.x,
+        colonist.y,
+        colonist.destination!.x,
+        colonist.destination!.y
+      );
+
+    if (alreadyInLaborRange) {
+      colonist.route = [];
+      colonist.moveProgress = 0;
+    } else if (colonist.route.length > 0) {
       colonist.moveProgress = (colonist.moveProgress ?? 0) + 1;
       if (colonist.moveProgress >= cSpecs.ticksPerTile) {
         colonist.moveProgress = 0;
@@ -358,11 +479,6 @@ export function applySingleTick(state: ColonyState): ColonyState {
     } else {
       colonist.moveProgress = 0;
     }
-
-    // Helper for labor reach (colonist is adjacent or directly on destination tile)
-    const isAdjacentOrOnSite = (cx: number, cy: number, tx: number, ty: number) => {
-      return Math.abs(cx - tx) + Math.abs(cy - ty) <= 1;
-    };
 
     // Colonist labor on site
     if (colonist.destination) {
@@ -406,6 +522,25 @@ export function applySingleTick(state: ColonyState): ColonyState {
                 colonist.destinationType = null;
                 colonist.targetEntityId = null;
               }
+            }
+          }
+        } else {
+          colonist.destination = null;
+          colonist.destinationType = null;
+          colonist.targetEntityId = null;
+        }
+      } else if (colonist.destinationType === 'construct' && colonist.targetEntityId) {
+        const b = updatedBuildings.find((bld) => bld.id === colonist.targetEntityId);
+        if (b && b.condition === 'constructing') {
+          if (isAdjacentOrOnSite(colonist.x, colonist.y, b.x, b.y)) {
+            b.repairProgress += 1;
+            const requiredTicks = mSpecs.constructionDurationTicks ?? 10;
+            if (b.repairProgress >= requiredTicks) {
+              completeConstruction(b, nextTick, updatedRovers, updatedBatteryCells);
+              colonist.destination = null;
+              colonist.destinationType = null;
+              colonist.targetEntityId = null;
+              colonist.route = [];
             }
           }
         } else {

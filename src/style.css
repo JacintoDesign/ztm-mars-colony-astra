@@ -327,11 +327,11 @@ html, body {
   background-color: #24140c;
 }
 
-/* Header Bar Controls (Top Right) */
+/* Header Bar Controls (Top Right) — same 38px row as speed + settings */
 .header-bar {
   position: fixed;
   top: 12px;
-  right: 56px;
+  right: 114px;
   height: 38px;
   box-sizing: border-box;
   display: flex;
@@ -946,6 +946,257 @@ body:not(:has(#internal-readout)) .resource-panel {
   background-color: #D94F3D;
 }
 
+/* Settings Cog Affordance */
+.settings-btn {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: 38px;
+  height: 38px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(26, 14, 8, 0.94);
+  border: 1px solid #3d2417;
+  border-radius: 0;
+  color: #d9dde0;
+  cursor: pointer;
+  outline: none;
+  z-index: 9990;
+  user-select: none;
+  padding: 0;
+}
+
+.settings-btn:hover {
+  border-color: #5e3824;
+  background-color: #24140c;
+}
+
+.settings-btn.active {
+  background-color: #2b170e;
+  border-color: #5e3824;
+}
+
+.settings-cog-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.speed-btn {
+  position: fixed;
+  top: 12px;
+  right: 56px;
+  height: 38px;
+  min-width: 50px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(26, 14, 8, 0.94);
+  border: 1px solid #3d2417;
+  border-radius: 0;
+  color: #d9dde0;
+  cursor: pointer;
+  outline: none;
+  z-index: 9990;
+  user-select: none;
+  padding: 0 10px;
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.5px;
+}
+
+.speed-btn:hover {
+  border-color: #5e3824;
+  background-color: #24140c;
+}
+
+.settings-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(26, 14, 8, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 24px;
+}
+
+.settings-modal-panel {
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  background-color: #1a0e08;
+  border: 1px solid #5e3824;
+  border-radius: 0;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.settings-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid #3d2417;
+  padding-bottom: 12px;
+}
+
+.settings-modal-title {
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: #d9dde0;
+  letter-spacing: 1px;
+}
+
+.settings-modal-subtitle {
+  font-family: 'Chakra Petch', monospace, sans-serif;
+  font-size: 11px;
+  color: #8c9ba5;
+  margin-top: 4px;
+  letter-spacing: 0.4px;
+}
+
+.settings-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #3d2417;
+}
+
+.settings-row-copy {
+  flex: 1;
+}
+
+.settings-row-title {
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #d9dde0;
+  margin-bottom: 4px;
+}
+
+.settings-row-hint {
+  font-family: 'Chakra Petch', monospace, sans-serif;
+  font-size: 12px;
+  color: #8c9ba5;
+  line-height: 1.35;
+}
+
+.settings-toggle {
+  flex-shrink: 0;
+  min-width: 56px;
+  height: 32px;
+  background-color: #1a0e08;
+  border: 1px solid #3d2417;
+  color: #8c9ba5;
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.settings-toggle.is-on {
+  border-color: #5e3824;
+  color: #d9dde0;
+  background-color: #24140c;
+}
+
+.settings-speed-group {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.settings-speed-opt {
+  min-width: 40px;
+  height: 32px;
+  background-color: #1a0e08;
+  border: 1px solid #3d2417;
+  color: #8c9ba5;
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-speed-opt.active {
+  border-color: #5e3824;
+  color: #d9dde0;
+  background-color: #24140c;
+}
+
+.settings-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #3d2417;
+}
+
+.settings-shortcut-line {
+  font-family: 'Chakra Petch', monospace, sans-serif;
+  font-size: 12px;
+  color: #d9dde0;
+}
+
+.settings-shortcut-line kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  margin-right: 8px;
+  border: 1px solid #5e3824;
+  background-color: #24140c;
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 11px;
+  color: #d9dde0;
+}
+
+.settings-help-link {
+  align-self: stretch;
+  height: 36px;
+  background-color: #1a0e08;
+  border: 1px solid #5e3824;
+  color: #d9dde0;
+  font-family: 'Orbitron', monospace, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.settings-help-link:hover {
+  background-color: #24140c;
+}
+
+.inspector-status-constructing {
+  background-color: rgba(217, 221, 224, 0.12);
+  border: 1px solid #8c9ba5;
+  color: #d9dde0;
+}
+
 /* Help Button (?) Affordance */
 .help-btn {
   position: fixed;
@@ -1253,7 +1504,7 @@ body:not(:has(#internal-readout)) .resource-panel {
   .header-bar {
     top: 6px;
     left: 6px;
-    right: 46px; /* Leaves 6px gap to 34px help button */
+    right: 92px;
     height: 34px;
     padding: 0 8px;
     gap: 6px;
@@ -1286,6 +1537,23 @@ body:not(:has(#internal-readout)) .resource-panel {
     font-size: 10px;
     padding: 0 6px;
     letter-spacing: 0.2px;
+  }
+
+  /* Settings & Speed Affordance */
+  .settings-btn {
+    top: 6px;
+    right: 6px;
+    width: 34px;
+    height: 34px;
+  }
+
+  .speed-btn {
+    top: 6px;
+    right: 46px;
+    height: 34px;
+    min-width: 42px;
+    padding: 0 8px;
+    font-size: 12px;
   }
 
   /* Help Affordance Button */

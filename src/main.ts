@@ -5,6 +5,8 @@ import { InternalReadout } from './ui/internal-readout';
 import { Toolbar } from './ui/toolbar';
 import { ResourcePanel } from './ui/resource-panel';
 import { HelpModal } from './ui/help-modal';
+import { GameSettings } from './ui/game-settings';
+import { nextAutopilotAction } from './simulation/autopilot';
 import { IsometricRenderer } from './engine/renderer';
 import { AuthModal } from './ui/auth-modal';
 import { HeaderBar } from './ui/header-bar';
@@ -39,11 +41,25 @@ const helpModal = new HelpModal({
       } catch (err) {
         console.warn('Failed to update tick timestamp on manual close:', err);
       }
-      toolbar.setStatus('Telemetry Link Nominal', 'nominal');
+      applySessionStatus();
       startSimulationLoops(activeUserId);
     }
   },
 });
+
+const gameSettings = new GameSettings({
+  onOpenHelp: () => helpModal.open(),
+  onChange: (settings) => {
+    if (settings.autopilot) {
+      lastAutopilotTick = store.getState().tick - 3;
+    }
+    if (activeUserId && store.getState().status === 'active' && !helpModal.isModalOpen()) {
+      startSimulationLoops(activeUserId);
+    }
+    applySessionStatus();
+  },
+});
+gameSettings.hideControls();
 
 // Dedicated action handlers invoked from contextual Building Inspector Cards & Map Beacons
 const handleRefineCell = async () => {
@@ -220,6 +236,7 @@ const buildingInspector = new BuildingInspector({
 (window as any).__COLONY_SERVICE__ = colonyService;
 (window as any).__COLONY_RESOURCE_PANEL__ = resourcePanel;
 (window as any).__COLONY_HELP_MODAL__ = helpModal;
+(window as any).__COLONY_GAME_SETTINGS__ = gameSettings;
 (window as any).__COLONY_TOOLBAR__ = toolbar;
 (window as any).__COLONY_TELEMETRY_BANNER__ = telemetryBanner;
 (window as any).__COLONY_MISSION_ADVISOR__ = missionAdvisor;
@@ -233,6 +250,28 @@ let isInitializingUserId: string | null = null;
 let clientProjectionInterval: number | null = null;
 let serverSyncInterval: number | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
+let lastAutopilotTick = -1;
+
+function applySessionStatus(): void {
+  if (helpModal.isModalOpen()) return;
+  const settings = gameSettings.getState();
+  toolbar.setStatus(
+    settings.autopilot ? `Autopilot Armed · ${settings.speed}×` : `Simulation Speed ${settings.speed}×`,
+    'nominal'
+  );
+}
+
+function maybeRunAutopilot(): void {
+  if (!gameSettings.getState().autopilot) return;
+  const state = store.getState();
+  if (state.status !== 'active') return;
+  if (lastAutopilotTick > state.tick) lastAutopilotTick = -1;
+  if (state.tick - lastAutopilotTick < 3) return;
+  const action = nextAutopilotAction(state);
+  if (!action) return;
+  lastAutopilotTick = state.tick;
+  store.dispatch(action);
+}
 
 // Game Over Screen Modal
 const gameOverModal = new GameOverModal({
@@ -244,8 +283,9 @@ const gameOverModal = new GameOverModal({
       const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'RESTART_COLONY' });
       if (res.success) {
         store.loadColonyData(res.colonyData, activeUserDisplay);
+        lastAutopilotTick = store.getState().tick - 3;
         gameOverModal.hide();
-        toolbar.setStatus('Colony Re-established', 'nominal');
+        applySessionStatus();
         startSimulationLoops(activeUserId);
       } else {
         toolbar.setStatus(`Restart Error: ${res.reason}`, 'critical');
@@ -329,28 +369,36 @@ function startSimulationLoops(userId: string): void {
     return;
   }
 
+  const settings = gameSettings.getState();
+  const tickMs = Math.round(1000 / settings.speed);
+  if (lastAutopilotTick > store.getState().tick) lastAutopilotTick = -1;
+
   // 1. Client-side projection (Display only)
   clientProjectionInterval = window.setInterval(() => {
-    if (helpModal.isModalOpen()) return;
+    if (helpModal.isModalOpen() || document.hidden) return;
     const state = store.getState();
     if (state.status === 'active') {
       store.advanceTicks(1);
+      maybeRunAutopilot();
     } else {
       stopSimulationLoops();
     }
-  }, 1000);
+  }, tickMs);
 
   // 2. Authoritative server sync: calls server tick route every 15 seconds
   serverSyncInterval = window.setInterval(async () => {
-    if (helpModal.isModalOpen()) return;
+    if (helpModal.isModalOpen() || document.hidden) return;
     if (store.getState().status !== 'active') {
       stopSimulationLoops();
       return;
     }
     if (activeColonyId && activeUserId === userId) {
       try {
-        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId);
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, {
+          speed: gameSettings.getState().speed,
+        });
         store.loadColonyData(updatedData, activeUserDisplay);
+        maybeRunAutopilot();
       } catch (err) {
         console.warn('Authoritative periodic server tick sync failed:', err);
       }
@@ -377,7 +425,9 @@ function stopSimulationLoops(): void {
 window.addEventListener('online', async () => {
   if (activeColonyId && activeUserId) {
     try {
-      const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId);
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
+          speed: gameSettings.getState().speed,
+        });
       store.loadColonyData(updatedData, activeUserDisplay);
       telemetryBanner.setState('hidden');
       toolbar.setActionsPaused(false);
@@ -392,6 +442,44 @@ window.addEventListener('offline', () => {
   telemetryBanner.setState('offline');
   toolbar.setActionsPaused(true);
   toolbar.setStatus('Network Offline - Actions Paused', 'warning');
+});
+
+document.addEventListener('visibilitychange', async () => {
+  if (!activeColonyId || !activeUserId || store.getState().status !== 'active') return;
+
+  if (document.hidden) {
+    stopSimulationLoops();
+    if (!gameSettings.getState().alwaysPassTime) {
+      try {
+        await colonyService.updateLastTickTime(activeColonyId, activeUserId);
+      } catch (err) {
+        console.warn('Failed to freeze tick clock while hidden:', err);
+      }
+    }
+    return;
+  }
+
+  try {
+    const settings = gameSettings.getState();
+    const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
+      skipCatchUp: !settings.alwaysPassTime,
+      speed: 1,
+    });
+    store.loadColonyData(updatedData, activeUserDisplay);
+  } catch (err) {
+    console.warn('Failed to resume colony tick on visibility:', err);
+  }
+
+  if (!helpModal.isModalOpen()) {
+    startSimulationLoops(activeUserId);
+  }
+});
+
+window.addEventListener('pagehide', () => {
+  if (!activeColonyId || !activeUserId) return;
+  if (!gameSettings.getState().alwaysPassTime) {
+    void colonyService.updateLastTickTime(activeColonyId, activeUserId);
+  }
 });
 
 async function handleAuthStateChange(authState: AuthState): Promise<void> {
@@ -412,6 +500,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
     toolbar.setActionsPaused(false);
     toolbar.setStatus('Authentication Required', 'warning');
     gameOverModal.hide();
+    gameSettings.hideControls();
     authModal.showHome();
     return;
   }
@@ -433,7 +522,10 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
 
   try {
     // Load or create colony: performs authoritative catch-up on load via server route
-    const colonyData = await colonyService.loadOrCreateColony(user.id);
+    const colonyData = await colonyService.loadOrCreateColony(user.id, {
+      skipCatchUp: !gameSettings.getState().alwaysPassTime,
+      speed: 1,
+    });
     activeUserId = user.id;
     activeColonyId = colonyData.colony.id;
 
@@ -486,10 +578,12 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
     );
 
     // Auto-open help modal on first load for this user (pauses simulation until dismissed)
+    lastAutopilotTick = store.getState().tick - 3;
+    gameSettings.showControls();
     const isFirstTimeHelp = helpModal.handleUserSession(user.id);
     if (!isFirstTimeHelp) {
       startSimulationLoops(user.id);
-      toolbar.setStatus('Telemetry Link Nominal', 'nominal');
+      applySessionStatus();
     } else {
       toolbar.setStatus('Simulation Paused (Reviewing Operations Manual)', 'warning');
     }

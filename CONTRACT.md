@@ -24,7 +24,7 @@
 - A new colony starts with oxygen 50, power 50, food 50, ore 25, electronics 2, 1 starter Habitat at tile (7, 7), 1 starter Solar Array at tile (5, 7), 1 starter Oxygen Scrubber at tile (9, 7), 2 Pioneer Colonists living at the starter Habitat, no pending arrivals, no rovers, no stored battery cells, and a fresh seed generating the colony's ore distribution and mining site positions
 
 ### Buildings & Workforce
-- **Workforce Capacity**: Industrial and operational facilities (solar, scrubbers, extractors, farms, garages, refineries) require colonist labor to maintain and operate. Each living colonist supports up to **4 operational facilities** ($\text{Max Operational Facilities} = \text{Living Colonists} \times 4$). Habitats provide residential quarters and are exempt from the operational facility limit. Only operational facilities count against this cap (broken, buried, and deactivated buildings are exempt).
+- **Workforce Capacity**: Industrial and operational facilities (solar, scrubbers, extractors, farms, garages, refineries) require colonist labor to maintain and operate. Each living colonist supports up to **5 operational facilities** ($\text{Max Operational Facilities} = \text{Living Colonists} \times 5$). Habitats provide residential quarters and are exempt from the operational facility limit. Only operational and constructing facilities count against this cap (broken, buried, and deactivated buildings are exempt).
 - **Building Costs & Specs**:
   - habitat: houses 2 colonists, draws 2 power/tick. Cost: 20 PWR, 10 Ore.
   - solar: produces 5 power/tick, draws 0. Cost: 15 PWR, 0 Ore.
@@ -96,6 +96,7 @@
 - garage: 30 power, 10 ore
 - refinery: 25 power, 15 ore
 - **Workforce Requirement**: Placing any structure beyond the initial starter colony requires at least 1 living colonist in the colony (`colonists.length >= 1`). If the colonist population is 0, building placement is rejected with reason "Colonist Workforce Required".
+- **Construction Labor**: Player-placed buildings (not starter structures) enter `constructing` and occupy the tile immediately. Cost is deducted on placement. The nearest idle colonist walks adjacent to the site and spends 10 ticks of on-site labor; only then does the building become `operational`. A colonist already adjacent works in place and does not walk off the tile. When multiple sites are unfinished, idle colonists spread across them rather than stacking on a single tile. Constructing buildings produce nothing, draw nothing, do not house colonists, and do not spawn garage rovers until complete. A colonist already assigned to dig, repair, or rover recovery is not pulled off that job to build.
 - A placement is rejected if the account cannot afford its cost. Cost is deducted server-side the instant placement succeeds
 - A placement is also rejected if the target tile currently holds a building, is buried, or is tile (0, 0). Tile (0, 0) is the permanent designated Landing Pad, and no buildings may be placed on it
 - For extractor specifically: placing an extractor on a dry tile (zero ore) is legal but pointless, and the game does not prevent it
@@ -133,7 +134,7 @@
 ### Colonist movement
 - Colonists move one tile every 5 ticks toward a destination building, stopping adjacent (0.2 tiles/tick)
 - A sub-tick counter (`moveProgress`, 0 to 4 ticks) tracks progress between each tile step
-- A colonist can be assigned four kinds of destination: a habitat on arrival, a broken building to repair, a buried building to dig out, or a stranded rover to recover. Only one at a time — a colonist already assigned to any of the four isn't pulled to a second one until the first finishes
+- A colonist can be assigned five kinds of destination: a habitat on arrival, a broken building to repair, a buried building to dig out, a stranded rover to recover, or a constructing building to finish. Only one at a time — a colonist already assigned to any of the five isn't pulled to a second one until the first finishes
 - Movement advances inside the tick function, not in rendering
 - Every movement choice must be deterministic — no fresh random numbers
 - A newly-landed colonist is assigned a destination — the nearest habitat with unclaimed capacity — in the same tick it's created. Capacity is claimed on assignment, not on arrival
@@ -186,8 +187,8 @@ Every field that needs to persist, in one place — the source of truth for the 
 - status — `active` or `game_over`
 - seed — the colony's own seeded generator state, set once at creation, advanced deterministically by every roll that reads from it
 - oreDeposits — array of `{ x, y, remaining }`, set once at creation from the seeded 500-total distribution
-- buildings — array of `{ type, x, y, condition, repairProgress, digProgress, wasBrokenBeforeBurial }`, condition one of `operational`, `broken`, `buried`, `deactivated`
-- colonists — array of `{ x, y, health, age, lifespan, moveProgress, destination, destinationType, targetEntityId, route }`, destinationType one of `habitat`, `repair`, `dig`, `rover_recovery`
+- buildings — array of `{ type, x, y, condition, repairProgress, digProgress, wasBrokenBeforeBurial }`, condition one of `operational`, `broken`, `buried`, `deactivated`, `constructing`
+- colonists — array of `{ x, y, health, age, lifespan, moveProgress, destination, destinationType, targetEntityId, route }`, destinationType one of `habitat`, `repair`, `dig`, `rover_recovery`, `construct`
 - pendingArrivals — array of `{ landedAtTick, electronics }`, position always the landing zone. Not colonists yet — no health, no age, not counted anywhere life support is
 - rovers — array of `{ garageX, garageY, x, y, state, power, cargo, destination, onSiteTicksRemaining, route }`, state one of `idle_at_base`, `traveling_out`, `on_site`, `traveling_back`, `stranded`; cargo either `{ type: 'ore', amount }`, `{ type: 'arrival' }`, or null
 - batteryCells — array of `{ efficiency }`, one entry per stored cell, at the refinery
@@ -214,7 +215,8 @@ Fields that persist per account, separate from any single colony — outlives a 
 | Catch-up Handler | Apply batched offline ticks on load up to the 28,800 tick ceiling |
 | Landing Zone | Render pending arrivals waiting at tile (0, 0) with visible time remaining before their escort window expires |
 | Game Over Screen | Display sols survived when the colony ends; offer a "Start New Colony" action that resets the account's colony to starting state |
-| Help Modal | Explain the survival goal, every building's cost and effect, the colonist arrival rule and escort requirement, and the maintenance mechanics — breakage, burial, aging — read live from CONTRACT.md. Open via a persistent "?" affordance, closeable, available regardless of game state |
+| Help Modal | Explain the survival goal, every building's cost and effect, the colonist arrival rule and escort requirement, and the maintenance mechanics — breakage, burial, aging — read live from CONTRACT.md. Open from the Settings panel ("OPEN MISSION MANUAL"), closeable, available regardless of game state |
+| Settings Panel | Persistent cog affordance. Contains: open Help Modal; toggle for time passing while the page is closed/hidden (off by default, so ticks freeze unless the page is open); autopilot toggle (off by default, preference stored in localStorage and restored on reload and new colonies); simulation speed 1×/2×/3× (1× default). Speed is also shown in the main HUD and cycles on click; the HUD control shows only the current multiplier. Keyboard shortcuts live in Settings: `[.]` cycles speed, `[S]` opens settings |
 | Diagnostic Panel | Plain-text readout of internal state for automated verification — tick, resources, colonist health and age, pending arrivals, building condition, rover and battery state, session identity, colony ownership. Renders only when the URL includes ?debug=true; absent otherwise. This is what /browser and /playtest read from |
 
 ## States
@@ -247,8 +249,10 @@ Fields that persist per account, separate from any single colony — outlives a 
 | Landing Zone | empty | No entries in pendingArrivals | Nothing rendered at tile (0, 0) beyond the tile itself |
 | Landing Zone | waiting | An entry exists in pendingArrivals with time remaining | Render the pending arrival with a visible countdown |
 | Landing Zone | urgent | An entry's remaining time drops below 30 ticks | Same rendering as waiting, with the countdown in the warning colour — the one visual escalation this piece gets, since a silent timeout is the failure mode most worth preventing |
-| Help Modal | closed | Default | The "?" affordance is visible; nothing else rendered |
-| Help Modal | open | Player clicks the "?" affordance | Modal shown over the current view. The tick keeps running underneath — opening it never pauses or affects authoritative state |
+| Help Modal | closed | Default | The Settings cog is visible; nothing else rendered |
+| Help Modal | open | Player opens the Mission Manual from Settings | Modal shown over the current view. The tick keeps running underneath unless the client pauses projection — opening it never mutates authoritative state |
+| Settings Panel | closed | Default | Cog and speed HUD visible while signed in |
+| Settings Panel | open | Player clicks the cog or presses `[S]` | Settings modal shown. Toggles persist locally. Tick continues underneath |
 
 ## States That Must Differ
 

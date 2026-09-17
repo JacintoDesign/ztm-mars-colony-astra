@@ -1701,7 +1701,7 @@ export function drawBuildingConditionOverlay(
   center: ScreenPoint,
   halfW: number,
   _halfH: number,
-  condition: 'operational' | 'broken' | 'buried' | 'deactivated'
+  condition: 'operational' | 'broken' | 'buried' | 'deactivated' | 'constructing'
 ): void {
   const s = halfW / 32;
 
@@ -1753,6 +1753,20 @@ export function drawBuildingConditionOverlay(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('OFF', 0, -18);
+  } else if (condition === 'constructing') {
+    ctx.fillStyle = 'rgba(26, 14, 8, 0.85)';
+    ctx.strokeStyle = '#8c9ba5';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(-18, -24, 36, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#d9dde0';
+    ctx.font = 'bold 6px Chakra Petch, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('BUILD', 0, -18);
   }
 
   ctx.restore();

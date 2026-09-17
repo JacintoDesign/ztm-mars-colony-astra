@@ -7,9 +7,9 @@ export type BuildingType =
   | 'garage'
   | 'refinery';
 
-export type BuildingCondition = 'operational' | 'broken' | 'buried' | 'deactivated';
+export type BuildingCondition = 'operational' | 'broken' | 'buried' | 'deactivated' | 'constructing';
 
-export type ColonistDestinationType = 'habitat' | 'repair' | 'dig' | 'rover_recovery';
+export type ColonistDestinationType = 'habitat' | 'repair' | 'dig' | 'rover_recovery' | 'construct';
 
 export type RoverState = 'idle_at_base' | 'traveling_out' | 'on_site' | 'traveling_back' | 'stranded';
 
@@ -82,6 +82,7 @@ export const CONTRACT_RULES = {
     dustStormChance: 0.30, // 30% chance per window
     maxBuriedPerStorm: 2,
     digOutDurationTicks: 40, // 40 ticks to dig out (survivable within 50-tick life-support buffer)
+    constructionDurationTicks: 10, // on-site labor after walk; faster than repair (50) / dig (40)
   },
 
   // Colony Spacing & Buffer Zone Rules
@@ -119,7 +120,7 @@ export const CONTRACT_RULES = {
 
   // Workforce & Labor Rules
   workforce: {
-    operationalBuildingsPerColonist: 4, // Each living colonist supports up to 4 operational buildings (Habitats exempt)
+    operationalBuildingsPerColonist: 5, // Each living colonist supports up to 5 operational buildings (Habitats exempt)
   },
 
   // Demolition rules
@@ -230,3 +231,13 @@ export const CONTRACT_RULES = {
     },
   },
 } as const;
+
+export function countsTowardWorkforceCap(building: {
+  type: BuildingType;
+  condition: BuildingCondition;
+}): boolean {
+  return (
+    building.type !== 'habitat' &&
+    (building.condition === 'operational' || building.condition === 'constructing')
+  );
+}
