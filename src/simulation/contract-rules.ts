@@ -82,7 +82,7 @@ export const CONTRACT_RULES = {
     dustStormChance: 0.30, // 30% chance per window
     maxBuriedPerStorm: 2,
     digOutDurationTicks: 40, // 40 ticks to dig out (survivable within 50-tick life-support buffer)
-    constructionDurationTicks: 10, // on-site labor after walk; faster than repair (50) / dig (40)
+    constructionDurationTicks: 6, // on-site labor after walk; short enough that two colonists can stand up a farm and a second scrubber before the food/O2 buffers empty
   },
 
   // Colony Spacing & Buffer Zone Rules

@@ -235,7 +235,7 @@ export const CONTRACT_RULES = {
     dustStormChance: 0.30,
     maxBuriedPerStorm: 2,
     digOutDurationTicks: 40,
-    constructionDurationTicks: 10,
+    constructionDurationTicks: 6,
   },
   spacing: {
     maxAdjacentForFullEfficiency: 1,
@@ -704,14 +704,13 @@ function routeToLaborSite(
   blockedTiles: Set<string>
 ): { x: number; y: number }[] {
   if (isAdjacentOrOnSite(colonist.x, colonist.y, target.x, target.y)) return [];
+  const start = { x: colonist.x, y: colonist.y };
   const goalTiles = getFreeAdjacentTiles({ x: target.x, y: target.y }, blockedTiles, 20);
-  if (goalTiles.some((g) => g.x === colonist.x && g.y === colonist.y)) return [];
-  return findShortestRoute(
-    { x: colonist.x, y: colonist.y },
-    goalTiles.length > 0 ? goalTiles : [{ x: target.x, y: target.y }],
-    blockedTiles,
-    20
-  );
+  const goals = goalTiles.length > 0 ? goalTiles : [{ x: target.x, y: target.y }];
+  const around = findShortestRoute(start, goals, blockedTiles, 20);
+  if (around.length > 0) return around;
+  if (goals.some((g) => g.x === colonist.x && g.y === colonist.y)) return [];
+  return findShortestRoute(start, [{ x: target.x, y: target.y }, ...goals], new Set(['0,0']), 20);
 }
 
 function completeConstruction(
@@ -998,6 +997,11 @@ export function applySingleTick(state: ColonyState): ColonyState {
         colonist.destinationType === 'construct') &&
       colonist.targetEntityId !== null;
 
+    const canPreemptConstruct =
+      colonist.destinationType === 'construct' &&
+      (buriedBuildings.length > 0 ||
+        brokenBuildings.some((b) => currentElectronics >= bSpecs[b.type].repairElectronics));
+
     if (
       colonist.destinationType === 'construct' &&
       colonist.targetEntityId &&
@@ -1014,7 +1018,7 @@ export function applySingleTick(state: ColonyState): ColonyState {
       }
     }
 
-    if (!isEngagedInMaintenance || colonist.destinationType === null) {
+    if (!isEngagedInMaintenance || colonist.destinationType === null || canPreemptConstruct) {
       if (buriedBuildings.length > 0) {
         const target = buriedBuildings[0];
         const goalTiles = getFreeAdjacentTiles({ x: target.x, y: target.y }, blockedTiles, 20);
@@ -1094,20 +1098,21 @@ export function applySingleTick(state: ColonyState): ColonyState {
       if (colonist.moveProgress >= cSpecs.ticksPerTile) {
         colonist.moveProgress = 0;
         const nextStep = colonist.route[0];
-        if (!blockedTiles.has(`${nextStep.x},${nextStep.y}`)) {
-          colonist.x = nextStep.x;
-          colonist.y = nextStep.y;
-          colonist.route = colonist.route.slice(1);
+        colonist.x = nextStep.x;
+        colonist.y = nextStep.y;
+        colonist.route = colonist.route.slice(1);
 
-          if (colonist.destinationType === 'rover_recovery' && colonist.targetEntityId) {
-            const r = updatedRovers.find((rov) => rov.id === colonist.targetEntityId);
-            if (r && r.state === 'stranded' && colonist.destination && (colonist.destination.x === r.garageX && colonist.destination.y === r.garageY)) {
-              r.x = colonist.x;
-              r.y = colonist.y;
-            }
+        if (colonist.destinationType === 'rover_recovery' && colonist.targetEntityId) {
+          const r = updatedRovers.find((rov) => rov.id === colonist.targetEntityId);
+          if (r && r.state === 'stranded' && colonist.destination && (colonist.destination.x === r.garageX && colonist.destination.y === r.garageY)) {
+            r.x = colonist.x;
+            r.y = colonist.y;
           }
         }
       }
+    } else if (colonist.destination && colonist.destinationType && colonist.destinationType !== 'habitat') {
+      colonist.route = routeToLaborSite(colonist, colonist.destination, blockedTiles);
+      colonist.moveProgress = 0;
     } else {
       colonist.moveProgress = 0;
     }

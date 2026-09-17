@@ -131,7 +131,7 @@ export class ColonyService {
           power: 50,
           food: 50,
           ore: CONTRACT_RULES.starting.ore ?? 25,
-          electronics: 0,
+          electronics: CONTRACT_RULES.starting.electronics ?? 2,
           seed: initialSeed,
           battery_cells: [],
           mining_sites: generatedMiningSites,

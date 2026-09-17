@@ -313,7 +313,8 @@ function maybeRunAutopilot(): void {
   const state = store.getState();
   if (state.status !== 'active') return;
   if (lastAutopilotTick > state.tick) lastAutopilotTick = -1;
-  if (state.tick - lastAutopilotTick < 3) return;
+  const urgent = state.food < 20 || state.oxygen < 20 || state.power < 15;
+  if (!urgent && state.tick - lastAutopilotTick < 3) return;
   const action = nextAutopilotAction(state);
   if (!action) return;
   lastAutopilotTick = state.tick;
