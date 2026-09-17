@@ -256,6 +256,7 @@ export class BuildingInspector {
       const deposit = state.oreDeposits.find((d) => d.x === building.x && d.y === building.y);
       const remaining = deposit?.remaining ?? 0;
       statsHtml += `<div class="inspector-stat-row"><span>Tile Ore Remaining:</span><span class="inspector-val-ore">${remaining} Ore</span></div>`;
+      statsHtml += `<div class="inspector-stat-row inspector-stat-note"><span>Demolish frees the tile. Remaining underground ore stays here — it is not added to the stockpile. Ore already extracted stays in the stockpile.</span></div>`;
     }
 
     // Garage and Refinery specific info

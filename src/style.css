@@ -2031,6 +2031,14 @@ body:not(:has(#internal-readout)) .resource-panel {
   color: #cbd5e1;
 }
 
+.inspector-stat-note {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #8c9ba5;
+  margin-top: 4px;
+}
+
 .inspector-val-pos {
   color: #4ec9b0;
   font-weight: 700;

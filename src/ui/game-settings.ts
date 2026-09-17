@@ -8,6 +8,8 @@ export interface GameSettingsState {
 
 export interface GameSettingsOptions {
   onOpenHelp: () => void;
+  onOpen?: () => void;
+  onClose?: () => void;
   onChange?: (state: GameSettingsState) => void;
 }
 
@@ -46,11 +48,15 @@ export class GameSettings {
   private isOpen = false;
   private controlsVisible = false;
   private onOpenHelp: () => void;
+  private onOpen?: () => void;
+  private onClose?: () => void;
   private onChange?: (state: GameSettingsState) => void;
 
   constructor(options: GameSettingsOptions) {
     this.state = loadSettings();
     this.onOpenHelp = options.onOpenHelp;
+    this.onOpen = options.onOpen;
+    this.onClose = options.onClose;
     this.onChange = options.onChange;
 
     this.settingsBtn = this.ensureButton(
@@ -86,13 +92,15 @@ export class GameSettings {
     this.overlay.style.display = 'flex';
     this.settingsBtn.classList.add('active');
     this.renderModal();
+    this.onOpen?.();
   }
 
-  public close(): void {
+  public close(options?: { silent?: boolean }): void {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.overlay.style.display = 'none';
     this.settingsBtn.classList.remove('active');
+    if (!options?.silent) this.onClose?.();
   }
 
   public showControls(): void {
@@ -103,7 +111,7 @@ export class GameSettings {
 
   public hideControls(): void {
     this.controlsVisible = false;
-    this.close();
+    this.close({ silent: true });
     this.settingsBtn.style.display = 'none';
     this.speedBtn.style.display = 'none';
   }
@@ -209,7 +217,7 @@ export class GameSettings {
           <div class="settings-row settings-row-speed">
             <div class="settings-row-copy">
               <div class="settings-row-title">SIMULATION SPEED</div>
-              <div class="settings-row-hint">Applies while this page is open. Default 1×.</div>
+              <div class="settings-row-hint">Applies while this page is open and is written to the colony on each server sync. Default 1×. Time away from the page still catches up at 1× (when enabled).</div>
             </div>
             <div class="settings-speed-group" role="group" aria-label="Simulation speed">
               ${([1, 2, 3] as SimulationSpeed[])
@@ -251,7 +259,7 @@ export class GameSettings {
       });
     });
     this.overlay.querySelector('#settings-open-help')?.addEventListener('click', () => {
-      this.close();
+      this.close({ silent: true });
       this.onOpenHelp();
     });
   }

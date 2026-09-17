@@ -133,7 +133,7 @@ Clicking any existing structure or the Landing Pad directly on the canvas opens 
 - **Power, Mobility & Demolition Controls**:
   - `[ ⚡ TURN OFF POWER (0 PWR) ]` / `[ ⚡ RESTORE POWER (ON) ]` for instant load shedding.
   - `[ ✥ RELOCATE (10 PWR) ]`: Relocates operational structure to any valid open tile.
-  - `[ 💥 DEMOLISH STRUCTURE (10 PWR) ]`: Permanently removes the structure and frees the tile for 10 Power (`DESTROY_BUILDING`).
+  - `[ 💥 DEMOLISH STRUCTURE (10 PWR) ]`: Permanently removes the structure and frees the tile for 10 Power (`DESTROY_BUILDING`). Extractors do not dump remaining underground ore into the stockpile; that deposit stays on the tile.
 - **Seamless Tool Switching & Auto-Deselection**: Clicking any existing structure on the canvas automatically cancels any active building placement tool or relocation mode, smoothly opening that building's context inspector card.
 - **Canvas Highlighting**: Selected structures feature 3D corner bracket crosshairs, glowing base tile diamonds, and a floating status HUD tag (`[ ⚡ POWER: ON / OFF ]`).
 - **Interactive Ship Action Beacon**: When a transport ship touches down at `(0, 0)`, an interactive `[ 🚀 DISPATCH ESCORT ]` HUD beacon renders directly overhead.
@@ -173,7 +173,7 @@ Same palette and type as everything else — plain text, no imagery. Opens over 
 
 ## Settings Panel
 
-A cog affordance sits in the top-right corner while signed in, replacing the former "?" button. Opening it shows local session controls: time-passing-while-away (off by default), autopilot (off by default, remembered in localStorage), and speed 1×/2×/3× (1× default). A speed readout sits beside the cog in the main HUD at the same height as the cog and sign-in row; clicking it cycles speed. Shortcut labels stay in Settings: `[.]` cycles speed, `[S]` opens and closes Settings.
+A cog affordance sits in the top-right corner while signed in, replacing the former "?" button. Opening it pauses the simulation until dismissed, same as the Help Modal. The panel shows local session controls: time-passing-while-away (off by default), autopilot (off by default, remembered in localStorage), and speed 1×/2×/3× (1× default). A speed readout sits beside the cog in the main HUD at the same height as the cog and sign-in row; clicking it cycles speed. Shortcut labels stay in Settings: `[.]` cycles speed, `[S]` opens and closes Settings.
 
 Worth being clear on why this is a second info panel and not one shared with the existing readout: the readout panel in the top-left corner exists for whatever is verifying the build — an agent, a browser check — and answers "what is the state right now." The Help Modal exists for the player and answers "what am I supposed to do." Different audience, different corner, never merged.
 

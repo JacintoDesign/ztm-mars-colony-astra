@@ -15,7 +15,7 @@
 ## Simulation Rules
 
 ### Tick
-- Tick interval: 1 second of real time
+- Tick interval: 1 second of real time at 1×. Simulation speed 2×/3× multiplies ticks applied while the page is open. Those sped-up ticks are persisted on the authoritative server tick (and on every player action). Refreshing reloads the saved tick count. Catch-up while the page is closed/hidden remains 1× wall-clock (when time-passing-while-away is on) and does not use the HUD speed multiplier.
 - lastTickAt stored with colony state
 - Applying N ticks in one batch must produce exactly the same state as applying N ticks one at a time
 - Every random-seeming decision in this document — building breakage, storm timing and target, asteroid timing and position, ore distribution at creation, movement tie-breaks — draws from the same seeded generator stored in colony state, never Math.random(). This is what makes the line above possible for a system with this many moving parts, not just the tick arithmetic itself
@@ -54,7 +54,7 @@
 - **Balanced Extractor Extraction**: An extractor placed on a tile mines only that tile's own deposit at **1 ore per 5 ticks** (requiring only **1 PWR draw/tick**), providing balanced, sustainable resource income without draining power grids or exhausting ore deposits instantly.
 - Once a tile's deposit is exhausted, an extractor there produces 0 ore permanently. It still draws 1 PWR unless deactivated by the player.
 - **Structure Deactivation & Relocation**: Players can select any structure (via map click or Building Inspector) and toggle its power state (deactivated: 0 PWR draw, 0 production). Players can also relocate a structure to another available tile on the grid for 10 Power.
-- **Structure Demolition**: Players can permanently demolish/destroy any building from its Inspector card for **10 Power** (`DESTROY_BUILDING`), freeing up the tile. Demolishing an extractor leaves any remaining subterranean deposit intact.
+- **Structure Demolition**: Players can permanently demolish/destroy any building from its Inspector card for **10 Power** (`DESTROY_BUILDING`), freeing up the tile. Demolishing an extractor does **not** move remaining underground ore into the colony stockpile — the deposit stays on that tile for a future extractor. Ore already extracted into the stockpile is kept. Demolishing an exhausted extractor only frees the tile.
 - The three mining sites below are the largest individual deposits in this same 500-total pool, deliberately placed far from the landing zone
 
 ### Food
@@ -216,7 +216,7 @@ Fields that persist per account, separate from any single colony — outlives a 
 | Landing Zone | Render pending arrivals waiting at tile (0, 0) with visible time remaining before their escort window expires |
 | Game Over Screen | Display sols survived when the colony ends; offer a "Start New Colony" action that resets the account's colony to starting state |
 | Help Modal | Explain the survival goal, every building's cost and effect, the colonist arrival rule and escort requirement, and the maintenance mechanics — breakage, burial, aging — read live from CONTRACT.md. Open from the Settings panel ("OPEN MISSION MANUAL"), closeable, available regardless of game state |
-| Settings Panel | Persistent cog affordance. Contains: open Help Modal; toggle for time passing while the page is closed/hidden (off by default, so ticks freeze unless the page is open); autopilot toggle (off by default, preference stored in localStorage and restored on reload and new colonies); simulation speed 1×/2×/3× (1× default). Speed is also shown in the main HUD and cycles on click; the HUD control shows only the current multiplier. Keyboard shortcuts live in Settings: `[.]` cycles speed, `[S]` opens settings |
+| Settings Panel | Persistent cog affordance. Contains: open Help Modal; toggle for time passing while the page is closed/hidden (off by default, so ticks freeze unless the page is open); autopilot toggle (off by default, preference stored in localStorage and restored on reload and new colonies); simulation speed 1×/2×/3× (1× default). Opening Settings pauses the simulation (same as Help). Speed is also shown in the main HUD and cycles on click; the HUD control shows only the current multiplier. Keyboard shortcuts live in Settings: `[.]` cycles speed, `[S]` opens settings |
 | Diagnostic Panel | Plain-text readout of internal state for automated verification — tick, resources, colonist health and age, pending arrivals, building condition, rover and battery state, session identity, colony ownership. Renders only when the URL includes ?debug=true; absent otherwise. This is what /browser and /playtest read from |
 
 ## States
@@ -250,9 +250,9 @@ Fields that persist per account, separate from any single colony — outlives a 
 | Landing Zone | waiting | An entry exists in pendingArrivals with time remaining | Render the pending arrival with a visible countdown |
 | Landing Zone | urgent | An entry's remaining time drops below 30 ticks | Same rendering as waiting, with the countdown in the warning colour — the one visual escalation this piece gets, since a silent timeout is the failure mode most worth preventing |
 | Help Modal | closed | Default | The Settings cog is visible; nothing else rendered |
-| Help Modal | open | Player opens the Mission Manual from Settings | Modal shown over the current view. The tick keeps running underneath unless the client pauses projection — opening it never mutates authoritative state |
+| Help Modal | open | Player opens the Mission Manual from Settings | Modal shown over the current view. Simulation paused until dismissed |
 | Settings Panel | closed | Default | Cog and speed HUD visible while signed in |
-| Settings Panel | open | Player clicks the cog or presses `[S]` | Settings modal shown. Toggles persist locally. Tick continues underneath |
+| Settings Panel | open | Player clicks the cog or presses `[S]` | Settings modal shown. Simulation paused until dismissed. Toggles persist locally. |
 
 ## States That Must Differ
 

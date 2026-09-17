@@ -34,7 +34,7 @@ serve(async (req) => {
       });
     }
 
-    const { colonyId, action } = await req.json();
+    const { colonyId, action, speed } = await req.json();
     if (!colonyId || !action) {
       return new Response(JSON.stringify({ error: 'Missing colonyId or action payload' }), {
         status: 400,
@@ -43,7 +43,9 @@ serve(async (req) => {
     }
 
     const { executeAuthoritativeAction } = await import('../_shared/simulation.ts');
-    const result = await executeAuthoritativeAction(supabase, colonyId, user.id, action);
+    const result = await executeAuthoritativeAction(supabase, colonyId, user.id, action, {
+      speed: typeof speed === 'number' ? speed : 1,
+    });
 
     return new Response(
       JSON.stringify(result),

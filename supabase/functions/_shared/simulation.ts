@@ -1488,8 +1488,8 @@ export async function executeAuthoritativeTick(
   const speed = Math.max(1, Math.min(3, Math.floor(options?.speed ?? 1)));
   const lastTickTime = colony.last_tick_at ? new Date(colony.last_tick_at).getTime() : Date.now();
   const now = Date.now();
-  const elapsedSeconds = Math.max(0, Math.floor((now - lastTickTime) / 1000));
-  const ticksToApply = Math.min(elapsedSeconds * speed, CONTRACT_RULES.maxCatchUpTicks);
+  const elapsedSeconds = Math.max(0, (now - lastTickTime) / 1000);
+  const ticksToApply = Math.min(Math.floor(elapsedSeconds * speed), CONTRACT_RULES.maxCatchUpTicks);
 
   if (colony.status === 'active' && ticksToApply > 0) {
     const currentState: ColonyState = {
@@ -1730,9 +1730,12 @@ export async function executeAuthoritativeAction(
   client: any,
   colonyId: string,
   userId: string,
-  action: SimulationAction
+  action: SimulationAction,
+  options?: { skipCatchUp?: boolean; speed?: number }
 ): Promise<{ success: boolean; reason?: string; colonyData: ColonyData }> {
-  const currentData = await executeAuthoritativeTick(client, colonyId, userId);
+  const currentData = await executeAuthoritativeTick(client, colonyId, userId, {
+    speed: options?.speed,
+  });
   const colony = currentData.colony;
   const buildings = currentData.buildings;
   const rovers = currentData.rovers;

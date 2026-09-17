@@ -277,12 +277,13 @@ export class ColonyService {
   public async executeServerAction(
     colonyId: string,
     userId: string,
-    action: SimulationAction
+    action: SimulationAction,
+    options?: AuthoritativeTickOptions
   ): Promise<{ success: boolean; reason?: string; colonyData: ColonyData }> {
     if (!import.meta.env.DEV) {
       try {
         const { data, error } = await supabase.functions.invoke('action', {
-          body: { colonyId, action },
+          body: { colonyId, action, speed: options?.speed ?? 1 },
         });
         if (!error && data && data.colonyData) {
           return data as { success: boolean; reason?: string; colonyData: ColonyData };
@@ -292,7 +293,7 @@ export class ColonyService {
       }
     }
 
-    return await executeAuthoritativeAction(supabase, colonyId, userId, action);
+    return await executeAuthoritativeAction(supabase, colonyId, userId, action, options);
   }
 
   /**

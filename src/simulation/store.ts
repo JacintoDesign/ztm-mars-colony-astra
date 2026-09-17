@@ -159,12 +159,13 @@ export class ColonyStore {
     this.notify();
   }
 
-  public loadColonyData(data: { colony: any; buildings: Building[]; colonists: any[]; rovers: any[]; oreDeposits: any[]; bestSolsSurvived: number }, signedInAccount: string): void {
+  public loadColonyData(data: { colony: any; buildings: Building[]; colonists: any[]; rovers: any[]; oreDeposits: any[]; bestSolsSurvived: number }, signedInAccount: string, options?: { authoritative?: boolean }): void {
     const isDifferentColony = !this.state.colonyId || this.state.colonyId !== data.colony.id;
     const isRestart = data.colony.status === 'active' && (data.colony.tick === 0 || this.state.status === 'game_over');
-    const monotonicTick = (isDifferentColony || isRestart)
-      ? (data.colony.tick ?? 0)
-      : Math.max(this.state.tick, data.colony.tick ?? 0);
+    const serverTick = data.colony.tick ?? 0;
+    const monotonicTick = (options?.authoritative || isDifferentColony || isRestart)
+      ? serverTick
+      : Math.max(this.state.tick, serverTick);
     this.state = {
       colonyId: data.colony.id,
       tick: monotonicTick,

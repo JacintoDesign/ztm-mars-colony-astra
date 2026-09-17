@@ -35,6 +35,7 @@ const helpModal = new HelpModal({
     toolbar.setStatus('Simulation Paused (Reviewing Manual)', 'warning');
   },
   onClose: async () => {
+    if (gameSettings.isModalOpen()) return;
     if (activeUserId && activeColonyId && store.getState().status === 'active') {
       try {
         await colonyService.updateLastTickTime(activeColonyId, activeUserId);
@@ -49,11 +50,30 @@ const helpModal = new HelpModal({
 
 const gameSettings = new GameSettings({
   onOpenHelp: () => helpModal.open(),
+  onOpen: () => {
+    stopSimulationLoops();
+    toolbar.setStatus('Simulation Paused (Settings)', 'warning');
+    if (activeColonyId && activeUserId) {
+      void colonyService.updateLastTickTime(activeColonyId, activeUserId);
+    }
+  },
+  onClose: async () => {
+    if (helpModal.isModalOpen()) return;
+    if (activeUserId && activeColonyId && store.getState().status === 'active') {
+      try {
+        await colonyService.updateLastTickTime(activeColonyId, activeUserId);
+      } catch (err) {
+        console.warn('Failed to freeze tick clock on settings close:', err);
+      }
+      applySessionStatus();
+      startSimulationLoops(activeUserId);
+    }
+  },
   onChange: (settings) => {
     if (settings.autopilot) {
       lastAutopilotTick = store.getState().tick - 3;
     }
-    if (activeUserId && store.getState().status === 'active' && !helpModal.isModalOpen()) {
+    if (activeUserId && store.getState().status === 'active' && !isUiPaused()) {
       startSimulationLoops(activeUserId);
     }
     applySessionStatus();
@@ -64,9 +84,14 @@ gameSettings.hideControls();
 // Dedicated action handlers invoked from contextual Building Inspector Cards & Map Beacons
 const handleRefineCell = async () => {
   if (!activeColonyId || !activeUserId) return;
-  const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'REFINE_CELL' });
+    const res = await colonyService.executeServerAction(
+      activeColonyId,
+      activeUserId,
+      { type: 'REFINE_CELL' },
+      { speed: gameSettings.getState().speed }
+    );
   if (res.success) {
-    store.loadColonyData(res.colonyData, activeUserDisplay);
+    store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
     toolbar.setStatus('Cell Refined (+1 Battery Cell)', 'nominal');
   } else {
     toolbar.setStatus(res.reason ? `Refine Failed: ${res.reason}` : 'Refine Failed', 'warning');
@@ -90,10 +115,10 @@ const handleDispatchEscort = async () => {
     type: 'DISPATCH_ROVER',
     roverId: idleRover.id,
     destinationType: 'landing_zone',
-  });
+  }, liveSpeed());
 
   if (res.success) {
-    store.loadColonyData(res.colonyData, activeUserDisplay);
+    store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
     toolbar.setStatus('Rover Dispatched to Landing Zone (0,0)', 'nominal');
   } else {
     toolbar.setStatus(res.reason ? `Dispatch Failed: ${res.reason}` : 'Dispatch Failed', 'warning');
@@ -126,10 +151,10 @@ const handleDispatchMining = async () => {
     roverId: idleRover.id,
     destinationType: destType,
     targetTile,
-  });
+  }, liveSpeed());
 
   if (res.success) {
-    store.loadColonyData(res.colonyData, activeUserDisplay);
+    store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
     toolbar.setStatus(`Rover Dispatched to ${destType === 'asteroid' ? 'Asteroid' : 'Mining Site'}`, 'nominal');
   } else {
     toolbar.setStatus(res.reason ? `Dispatch Failed: ${res.reason}` : 'Dispatch Failed', 'warning');
@@ -252,13 +277,35 @@ let serverSyncInterval: number | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 let lastAutopilotTick = -1;
 
+function isUiPaused(): boolean {
+  return helpModal.isModalOpen() || gameSettings.isModalOpen();
+}
+
 function applySessionStatus(): void {
-  if (helpModal.isModalOpen()) return;
+  if (helpModal.isModalOpen()) {
+    toolbar.setStatus('Simulation Paused (Reviewing Manual)', 'warning');
+    return;
+  }
+  if (gameSettings.isModalOpen()) {
+    toolbar.setStatus('Simulation Paused (Settings)', 'warning');
+    return;
+  }
   const settings = gameSettings.getState();
   toolbar.setStatus(
     settings.autopilot ? `Autopilot Armed · ${settings.speed}×` : `Simulation Speed ${settings.speed}×`,
     'nominal'
   );
+}
+
+function liveSpeed(): { speed: number } {
+  return { speed: gameSettings.getState().speed };
+}
+
+async function flushAuthoritativeTicks(): Promise<void> {
+  if (!activeColonyId || !activeUserId) return;
+  if (store.getState().status !== 'active') return;
+  const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, liveSpeed());
+  store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
 }
 
 function maybeRunAutopilot(): void {
@@ -280,9 +327,9 @@ const gameOverModal = new GameOverModal({
     toolbar.setStatus('Re-initializing Colony...', 'warning');
 
     try {
-      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'RESTART_COLONY' });
+      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'RESTART_COLONY' }, liveSpeed());
       if (res.success) {
-        store.loadColonyData(res.colonyData, activeUserDisplay);
+        store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
         lastAutopilotTick = store.getState().tick - 3;
         gameOverModal.hide();
         applySessionStatus();
@@ -364,8 +411,8 @@ const authModal = new AuthModal({
 function startSimulationLoops(userId: string): void {
   stopSimulationLoops();
 
-  if (helpModal.isModalOpen()) {
-    toolbar.setStatus('Simulation Paused (Reviewing Manual)', 'warning');
+  if (isUiPaused()) {
+    applySessionStatus();
     return;
   }
 
@@ -375,7 +422,7 @@ function startSimulationLoops(userId: string): void {
 
   // 1. Client-side projection (Display only)
   clientProjectionInterval = window.setInterval(() => {
-    if (helpModal.isModalOpen() || document.hidden) return;
+    if (isUiPaused() || document.hidden) return;
     const state = store.getState();
     if (state.status === 'active') {
       store.advanceTicks(1);
@@ -385,25 +432,24 @@ function startSimulationLoops(userId: string): void {
     }
   }, tickMs);
 
-  // 2. Authoritative server sync: calls server tick route every 15 seconds
+  // 2. Authoritative server sync — more often at 2×/3× so sped-up ticks are written
+  const syncMs = Math.round(15000 / settings.speed);
   serverSyncInterval = window.setInterval(async () => {
-    if (helpModal.isModalOpen() || document.hidden) return;
+    if (isUiPaused() || document.hidden) return;
     if (store.getState().status !== 'active') {
       stopSimulationLoops();
       return;
     }
     if (activeColonyId && activeUserId === userId) {
       try {
-        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, {
-          speed: gameSettings.getState().speed,
-        });
-        store.loadColonyData(updatedData, activeUserDisplay);
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, liveSpeed());
+        store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
         maybeRunAutopilot();
       } catch (err) {
         console.warn('Authoritative periodic server tick sync failed:', err);
       }
     }
-  }, 15000);
+  }, syncMs);
 }
 
 function stopSimulationLoops(): void {
@@ -425,13 +471,16 @@ function stopSimulationLoops(): void {
 window.addEventListener('online', async () => {
   if (activeColonyId && activeUserId) {
     try {
-        const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
-          speed: gameSettings.getState().speed,
-        });
-      store.loadColonyData(updatedData, activeUserDisplay);
+      const updatedData = await colonyService.triggerServerTick(
+        activeColonyId,
+        activeUserId,
+        isUiPaused() ? { skipCatchUp: true } : liveSpeed()
+      );
+      store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
       telemetryBanner.setState('hidden');
       toolbar.setActionsPaused(false);
-      toolbar.setStatus('Telemetry Link Nominal', 'nominal');
+      if (isUiPaused()) applySessionStatus();
+      else toolbar.setStatus('Telemetry Link Nominal', 'nominal');
     } catch {
       // Periodic server sync will retry
     }
@@ -449,12 +498,14 @@ document.addEventListener('visibilitychange', async () => {
 
   if (document.hidden) {
     stopSimulationLoops();
-    if (!gameSettings.getState().alwaysPassTime) {
-      try {
+    try {
+      if (isUiPaused()) {
         await colonyService.updateLastTickTime(activeColonyId, activeUserId);
-      } catch (err) {
-        console.warn('Failed to freeze tick clock while hidden:', err);
+      } else {
+        await flushAuthoritativeTicks();
       }
+    } catch (err) {
+      console.warn('Failed to flush ticks while hidden:', err);
     }
     return;
   }
@@ -462,24 +513,25 @@ document.addEventListener('visibilitychange', async () => {
   try {
     const settings = gameSettings.getState();
     const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
-      skipCatchUp: !settings.alwaysPassTime,
+      skipCatchUp: isUiPaused() || !settings.alwaysPassTime,
       speed: 1,
     });
-    store.loadColonyData(updatedData, activeUserDisplay);
+    store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
   } catch (err) {
     console.warn('Failed to resume colony tick on visibility:', err);
   }
 
-  if (!helpModal.isModalOpen()) {
+  if (!isUiPaused()) {
     startSimulationLoops(activeUserId);
   }
 });
 
 window.addEventListener('pagehide', () => {
-  if (!activeColonyId || !activeUserId) return;
-  if (!gameSettings.getState().alwaysPassTime) {
+  if (isUiPaused() && activeColonyId && activeUserId) {
     void colonyService.updateLastTickTime(activeColonyId, activeUserId);
+    return;
   }
+  void flushAuthoritativeTicks();
 });
 
 async function handleAuthStateChange(authState: AuthState): Promise<void> {
@@ -530,7 +582,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
     activeColonyId = colonyData.colony.id;
 
     // Populate store with authoritative colony state
-    store.loadColonyData(colonyData, activeUserDisplay);
+    store.loadColonyData(colonyData, activeUserDisplay, { authoritative: true });
 
     renderer.setPreviewState(null);
 
@@ -539,9 +591,9 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
       if (!activeColonyId || !activeUserId) {
         return { success: false, reason: 'No active session' };
       }
-      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, action);
+      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, action, liveSpeed());
       if (res.success) {
-        store.loadColonyData(res.colonyData, activeUserDisplay);
+        store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
       }
       return { success: res.success, reason: res.reason };
     });
@@ -569,7 +621,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
           if (navigator.onLine) {
             telemetryBanner.setState('hidden');
             toolbar.setActionsPaused(false);
-            if (!helpModal.isModalOpen()) {
+            if (!isUiPaused()) {
               toolbar.setStatus('Telemetry Link Nominal', 'nominal');
             }
           }
