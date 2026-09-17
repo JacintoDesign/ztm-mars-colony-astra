@@ -87,7 +87,7 @@ const handleRefineCell = async () => {
       activeColonyId,
       activeUserId,
       { type: 'REFINE_CELL' },
-      { speed: gameSettings.getState().speed }
+      persistTickOptions()
     );
   if (res.success) {
     store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
@@ -114,7 +114,7 @@ const handleDispatchEscort = async () => {
     type: 'DISPATCH_ROVER',
     roverId: idleRover.id,
     destinationType: 'landing_zone',
-  }, liveSpeed());
+  }, persistTickOptions());
 
   if (res.success) {
     store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
@@ -150,7 +150,7 @@ const handleDispatchMining = async () => {
     roverId: idleRover.id,
     destinationType: destType,
     targetTile,
-  }, liveSpeed());
+  }, persistTickOptions());
 
   if (res.success) {
     store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
@@ -311,10 +311,22 @@ function liveSpeed(): { speed: number } {
   return { speed: gameSettings.getState().speed };
 }
 
+function persistTickOptions(): { speed: number; maxTicks: number } {
+  const speed = gameSettings.getState().speed;
+  return { speed, maxTicks: Math.max(12, speed * 6) };
+}
+
+function awayTickOptions(): { skipCatchUp: true } | { speed: number } {
+  if (gameSettings.getState().alwaysPassTime && !isUiPaused()) {
+    return liveSpeed();
+  }
+  return { skipCatchUp: true };
+}
+
 async function flushAuthoritativeTicks(): Promise<void> {
   if (!activeColonyId || !activeUserId) return;
   if (store.getState().status !== 'active') return;
-  const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, liveSpeed());
+  const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, persistTickOptions());
   store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
 }
 
@@ -344,7 +356,7 @@ const gameOverModal = new GameOverModal({
     toolbar.setStatus('Re-initializing Colony...', 'warning');
 
     try {
-      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'RESTART_COLONY' }, liveSpeed());
+      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'RESTART_COLONY' }, persistTickOptions());
       if (res.success) {
         store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
         lastAutopilotTick = store.getState().tick - 3;
@@ -466,7 +478,7 @@ async function runAuthoritativeSync(userId: string): Promise<void> {
     }
     if (activeColonyId && activeUserId === userId) {
       try {
-        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, liveSpeed());
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, persistTickOptions());
         store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
         maybeRunAutopilot();
       } catch (err) {
@@ -498,7 +510,7 @@ window.addEventListener('online', async () => {
       const updatedData = await colonyService.triggerServerTick(
         activeColonyId,
         activeUserId,
-        isUiPaused() ? { skipCatchUp: true } : liveSpeed()
+        isUiPaused() || !gameSettings.getState().alwaysPassTime ? { skipCatchUp: true } : persistTickOptions()
       );
       store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
       telemetryBanner.setState('hidden');
@@ -522,11 +534,12 @@ document.addEventListener('visibilitychange', async () => {
 
   if (document.hidden) {
     stopSimulationLoops();
-    colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
+    colonyService.flushTicksKeepalive(activeColonyId, awayTickOptions());
     await enqueueTickSync(async () => {
       try {
-        await flushAuthoritativeTicks();
-        if (!gameSettings.getState().alwaysPassTime) {
+        if (gameSettings.getState().alwaysPassTime) {
+          await flushAuthoritativeTicks();
+        } else {
           await freezeTickClock();
         }
       } catch (err) {
@@ -542,6 +555,8 @@ document.addEventListener('visibilitychange', async () => {
       if (settings.alwaysPassTime && !isUiPaused() && activeColonyId && activeUserId) {
         const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, liveSpeed());
         store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+      } else if (activeColonyId && activeUserId) {
+        await freezeTickClock();
       }
     } catch (err) {
       console.warn('Failed to resume colony tick on visibility:', err);
@@ -555,12 +570,12 @@ document.addEventListener('visibilitychange', async () => {
 
 window.addEventListener('pagehide', () => {
   if (!activeColonyId || store.getState().status !== 'active') return;
-  colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
+  colonyService.flushTicksKeepalive(activeColonyId, awayTickOptions());
 });
 
 window.addEventListener('freeze', () => {
   if (!activeColonyId || store.getState().status !== 'active') return;
-  colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
+  colonyService.flushTicksKeepalive(activeColonyId, awayTickOptions());
 });
 
 async function handleAuthStateChange(authState: AuthState): Promise<void> {
@@ -624,7 +639,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
       if (!activeColonyId || !activeUserId) {
         return { success: false, reason: 'No active session' };
       }
-      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, action, liveSpeed());
+      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, action, persistTickOptions());
       if (res.success) {
         store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
       }

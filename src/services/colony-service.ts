@@ -267,6 +267,7 @@ export class ColonyService {
             colonyId,
             skipCatchUp: options?.skipCatchUp ?? false,
             speed: options?.speed ?? 1,
+            maxTicks: options?.maxTicks,
           },
         });
         if (!error && data?.colonyData && !data.error) {
@@ -299,6 +300,7 @@ export class ColonyService {
           colonyId,
           skipCatchUp: options?.skipCatchUp ?? false,
           speed: options?.speed ?? 1,
+          maxTicks: options?.maxTicks,
         }),
         keepalive: true,
       });
@@ -320,7 +322,13 @@ export class ColonyService {
     if (!import.meta.env.DEV) {
       try {
         const { data, error } = await supabase.functions.invoke('action', {
-          body: { colonyId, action, speed: options?.speed ?? 1 },
+          body: {
+            colonyId,
+            action,
+            speed: options?.speed ?? 1,
+            maxTicks: options?.maxTicks,
+            skipCatchUp: options?.skipCatchUp ?? false,
+          },
         });
         if (!error && data && data.colonyData) {
           return data as { success: boolean; reason?: string; colonyData: ColonyData };

@@ -1368,7 +1368,7 @@ export async function executeAuthoritativeTick(
   client: any,
   colonyId: string,
   userId: string,
-  options?: { skipCatchUp?: boolean; speed?: number }
+  options?: { skipCatchUp?: boolean; speed?: number; maxTicks?: number }
 ): Promise<ColonyData> {
   let bestSolsSurvived = 0;
   const { data: userProfile } = await client
@@ -1394,11 +1394,15 @@ export async function executeAuthoritativeTick(
 
   const colony: ColonyRecord = colonyRow as ColonyRecord;
 
-  const { data: buildingsData } = await client
+  const { data: buildingsData, error: buildingsError } = await client
     .from('marscolony_buildings')
     .select('*')
     .eq('colony_id', colonyId)
     .order('created_at', { ascending: true });
+
+  if (buildingsError) {
+    throw new Error(`Failed to query buildings: ${buildingsError.message}`);
+  }
 
   const buildings: Building[] = (buildingsData || []).map((b: any) => buildingFromRow(b));
 
@@ -1464,10 +1468,21 @@ export async function executeAuthoritativeTick(
   if (colony.status === 'game_over') {
     return {
       colony: { ...colony, status: 'game_over' },
-      buildings: [],
-      colonists: [],
-      rovers: [],
-      oreDeposits: [],
+      buildings,
+      colonists,
+      rovers,
+      oreDeposits,
+      bestSolsSurvived,
+    };
+  }
+
+  if ((colony.tick ?? 0) > 0 && buildings.length === 0) {
+    return {
+      colony,
+      buildings,
+      colonists,
+      rovers,
+      oreDeposits,
       bestSolsSurvived,
     };
   }
@@ -1494,7 +1509,11 @@ export async function executeAuthoritativeTick(
   const lastTickTime = colony.last_tick_at ? new Date(colony.last_tick_at).getTime() : Date.now();
   const now = Date.now();
   const elapsedSeconds = Math.max(0, (now - lastTickTime) / 1000);
-  const ticksToApply = Math.min(Math.floor(elapsedSeconds * speed), CONTRACT_RULES.maxCatchUpTicks);
+  const catchUpCap =
+    options?.maxTicks != null
+      ? Math.min(CONTRACT_RULES.maxCatchUpTicks, Math.max(0, Math.floor(options.maxTicks)))
+      : CONTRACT_RULES.maxCatchUpTicks;
+  const ticksToApply = Math.min(Math.floor(elapsedSeconds * speed), catchUpCap);
 
   if (colony.status === 'active' && ticksToApply > 0) {
     const currentState: ColonyState = {
@@ -1524,7 +1543,7 @@ export async function executeAuthoritativeTick(
     const nextState = applyTicks(currentState, ticksToApply);
     const newLastTickAt = new Date().toISOString();
 
-    await client
+    const { data: persistedRows } = await client
       .from('marscolony_colonies')
       .update({
         oxygen: nextState.oxygen,
@@ -1543,7 +1562,20 @@ export async function executeAuthoritativeTick(
         updated_at: newLastTickAt,
       })
       .eq('id', colonyId)
-      .eq('owner', userId);
+      .eq('owner', userId)
+      .eq('tick', colony.tick)
+      .select('tick');
+
+    if (!persistedRows || persistedRows.length === 0) {
+      return {
+        colony,
+        buildings,
+        colonists,
+        rovers,
+        oreDeposits,
+        bestSolsSurvived,
+      };
+    }
 
     // If colony reached game_over, wipe active sub-entities from DB
     if (nextState.status === 'game_over') {
@@ -1736,10 +1768,12 @@ export async function executeAuthoritativeAction(
   colonyId: string,
   userId: string,
   action: SimulationAction,
-  options?: { skipCatchUp?: boolean; speed?: number }
+  options?: { skipCatchUp?: boolean; speed?: number; maxTicks?: number }
 ): Promise<{ success: boolean; reason?: string; colonyData: ColonyData }> {
   const currentData = await executeAuthoritativeTick(client, colonyId, userId, {
     speed: options?.speed,
+    maxTicks: options?.maxTicks,
+    skipCatchUp: options?.skipCatchUp,
   });
   const colony = currentData.colony;
   const buildings = currentData.buildings;
