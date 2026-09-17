@@ -159,16 +159,18 @@ export class ColonyStore {
     this.notify();
   }
 
-  public loadColonyData(data: { colony: any; buildings: Building[]; colonists: any[]; rovers: any[]; oreDeposits: any[]; bestSolsSurvived: number }, signedInAccount: string, options?: { authoritative?: boolean }): void {
+  public loadColonyData(data: { colony: any; buildings: Building[]; colonists: any[]; rovers: any[]; oreDeposits: any[]; bestSolsSurvived: number }, signedInAccount: string, _options?: { authoritative?: boolean }): void {
     const isDifferentColony = !this.state.colonyId || this.state.colonyId !== data.colony.id;
     const isRestart = data.colony.status === 'active' && (data.colony.tick === 0 || this.state.status === 'game_over');
     const serverTick = data.colony.tick ?? 0;
-    const monotonicTick = (options?.authoritative || isDifferentColony || isRestart)
-      ? serverTick
-      : Math.max(this.state.tick, serverTick);
+    // Projection may sit ahead of a stale persist. Never rewind an in-session
+    // colony; only restarts and colony switches may drop the counter.
+    if (!isDifferentColony && !isRestart && serverTick < this.state.tick) {
+      return;
+    }
     this.state = {
       colonyId: data.colony.id,
-      tick: monotonicTick,
+      tick: serverTick,
       oxygen: data.colony.oxygen,
       power: data.colony.power,
       food: data.colony.food ?? 50,

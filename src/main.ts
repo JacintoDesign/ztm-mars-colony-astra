@@ -33,7 +33,7 @@ const helpModal = new HelpModal({
   onOpen: () => {
     stopSimulationLoops();
     toolbar.setStatus('Simulation Paused (Reviewing Manual)', 'warning');
-    void flushAuthoritativeTicks();
+    void enqueueTickSync(() => flushAuthoritativeTicks());
   },
   onClose: async () => {
     if (gameSettings.isModalOpen()) return;
@@ -54,7 +54,7 @@ const gameSettings = new GameSettings({
   onOpen: () => {
     stopSimulationLoops();
     toolbar.setStatus('Simulation Paused (Settings)', 'warning');
-    void flushAuthoritativeTicks();
+    void enqueueTickSync(() => flushAuthoritativeTicks());
   },
   onClose: async () => {
     if (helpModal.isModalOpen()) return;
@@ -276,6 +276,16 @@ let serverSyncInterval: number | null = null;
 let serverSyncTimeout: number | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 let lastAutopilotTick = -1;
+let tickSyncChain: Promise<void> = Promise.resolve();
+
+function enqueueTickSync(work: () => Promise<void>): Promise<void> {
+  const run = tickSyncChain.then(work, work);
+  tickSyncChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
 
 function isUiPaused(): boolean {
   return helpModal.isModalOpen() || gameSettings.isModalOpen();
@@ -306,6 +316,12 @@ async function flushAuthoritativeTicks(): Promise<void> {
   if (store.getState().status !== 'active') return;
   const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, liveSpeed());
   store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+}
+
+async function freezeTickClock(): Promise<void> {
+  if (!activeColonyId || !activeUserId) return;
+  if (store.getState().status !== 'active') return;
+  await colonyService.updateLastTickTime(activeColonyId, activeUserId);
 }
 
 function maybeRunAutopilot(): void {
@@ -442,20 +458,22 @@ function startSimulationLoops(userId: string): void {
 }
 
 async function runAuthoritativeSync(userId: string): Promise<void> {
-  if (isUiPaused() || document.hidden) return;
-  if (store.getState().status !== 'active') {
-    stopSimulationLoops();
-    return;
-  }
-  if (activeColonyId && activeUserId === userId) {
-    try {
-      const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, liveSpeed());
-      store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
-      maybeRunAutopilot();
-    } catch (err) {
-      console.warn('Authoritative periodic server tick sync failed:', err);
+  await enqueueTickSync(async () => {
+    if (isUiPaused() || document.hidden) return;
+    if (store.getState().status !== 'active') {
+      stopSimulationLoops();
+      return;
     }
-  }
+    if (activeColonyId && activeUserId === userId) {
+      try {
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, liveSpeed());
+        store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+        maybeRunAutopilot();
+      } catch (err) {
+        console.warn('Authoritative periodic server tick sync failed:', err);
+      }
+    }
+  });
 }
 
 function stopSimulationLoops(): void {
@@ -505,24 +523,30 @@ document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     stopSimulationLoops();
     colonyService.flushTicksKeepalive(activeColonyId, liveSpeed());
-    try {
-      await flushAuthoritativeTicks();
-    } catch (err) {
-      console.warn('Failed to flush ticks while hidden:', err);
-    }
+    await enqueueTickSync(async () => {
+      try {
+        await flushAuthoritativeTicks();
+        if (!gameSettings.getState().alwaysPassTime) {
+          await freezeTickClock();
+        }
+      } catch (err) {
+        console.warn('Failed to flush ticks while hidden:', err);
+      }
+    });
     return;
   }
 
-  try {
-    const settings = gameSettings.getState();
-    const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
-      skipCatchUp: isUiPaused() || !settings.alwaysPassTime,
-      speed: 1,
-    });
-    store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
-  } catch (err) {
-    console.warn('Failed to resume colony tick on visibility:', err);
-  }
+  await enqueueTickSync(async () => {
+    try {
+      const settings = gameSettings.getState();
+      if (settings.alwaysPassTime && !isUiPaused() && activeColonyId && activeUserId) {
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, liveSpeed());
+        store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+      }
+    } catch (err) {
+      console.warn('Failed to resume colony tick on visibility:', err);
+    }
+  });
 
   if (!isUiPaused()) {
     startSimulationLoops(activeUserId);

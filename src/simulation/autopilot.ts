@@ -45,35 +45,50 @@ function crowdingIfPlaced(state: ColonyState, x: number, y: number, occupied: Se
   return penalty;
 }
 
+function diagonalNeighborCount(x: number, y: number, occupied: Set<string>): number {
+  return [
+    [x - 1, y - 1],
+    [x + 1, y - 1],
+    [x + 1, y + 1],
+    [x - 1, y + 1],
+  ].filter(([nx, ny]) => occupied.has(`${nx},${ny}`)).length;
+}
+
 function findOpenTile(
   state: ColonyState,
   options: { preferOre?: boolean; nearWorkers?: boolean } = {}
 ): GridCoord | null {
   const occupied = occupiedTiles(state);
   const origin = CONTRACT_RULES.starting.starterHabitat;
-  const candidates: Array<GridCoord & { score: number }> = [];
   const { preferOre = false, nearWorkers = false } = options;
 
-  for (let x = 0; x < GRID_SIZE; x++) {
-    for (let y = 0; y < GRID_SIZE; y++) {
-      if (occupied.has(`${x},${y}`)) continue;
-      const deposit = state.oreDeposits.find((d) => d.x === x && d.y === y && d.remaining > 0);
-      if (preferOre && !deposit) continue;
-      const neighbors = neighborCount(x, y, occupied);
-      if (neighbors >= 2) continue;
-      const dist = Math.abs(x - origin.x) + Math.abs(y - origin.y);
-      const walk = nearWorkers ? minDistToWorkers(state, x, y) : dist;
-      const orePenalty = !preferOre && deposit ? 12 : 0;
-      const oreBonus = preferOre && deposit ? -deposit.remaining : 0;
-      const clusterPenalty = crowdingIfPlaced(state, x, y, occupied);
-      candidates.push({
-        x,
-        y,
-        score: walk * 40 + dist * 10 + neighbors + orePenalty + oreBonus + clusterPenalty,
-      });
+  const collect = (maxOrtho: number): Array<GridCoord & { score: number }> => {
+    const candidates: Array<GridCoord & { score: number }> = [];
+    for (let x = 0; x < GRID_SIZE; x++) {
+      for (let y = 0; y < GRID_SIZE; y++) {
+        if (occupied.has(`${x},${y}`)) continue;
+        const deposit = state.oreDeposits.find((d) => d.x === x && d.y === y && d.remaining > 0);
+        if (preferOre && !deposit) continue;
+        const neighbors = neighborCount(x, y, occupied);
+        if (neighbors > maxOrtho) continue;
+        const dist = Math.abs(x - origin.x) + Math.abs(y - origin.y);
+        const walk = nearWorkers ? minDistToWorkers(state, x, y) : dist;
+        const orePenalty = !preferOre && deposit ? 12 : 0;
+        const oreBonus = preferOre && deposit ? -deposit.remaining : 0;
+        const clusterPenalty = crowdingIfPlaced(state, x, y, occupied);
+        const diag = diagonalNeighborCount(x, y, occupied);
+        candidates.push({
+          x,
+          y,
+          score: neighbors * 200 + diag * 50 + walk * 8 + dist * 10 + orePenalty + oreBonus + clusterPenalty,
+        });
+      }
     }
-  }
+    return candidates;
+  };
 
+  let candidates = collect(0);
+  if (candidates.length === 0) candidates = collect(1);
   if (candidates.length === 0 && preferOre) {
     return findOpenTile(state, { ...options, preferOre: false });
   }
@@ -364,14 +379,11 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
   }
 
   const needBeds = mouths + state.pendingArrivals.length >= habitatCapacity;
-  if (
+  const needExtractor =
     countType(state, 'garage') > 0 &&
     countType(state, 'extractor') < MAX_EXTRACTORS &&
-    constructingOf(state, 'extractor') === 0 &&
-    constructingCount(state) === 0 &&
-    needBeds &&
-    state.ore < specs.habitat.cost.ore
-  ) {
+    constructingOf(state, 'extractor') === 0;
+  if (needExtractor && (needBeds || stillNeedsExtractorOre(state) || state.ore < 10)) {
     const extractor = trySolarThen(state, 'extractor');
     if (extractor?.type === 'PLACE_BUILDING' && extractor.buildingType === 'extractor') {
       const tile = findOpenTile(state, { preferOre: true, nearWorkers: true });
@@ -383,8 +395,7 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
   if (
     needBeds &&
     habitatCapacity < 4 &&
-    constructingOf(state, 'habitat') === 0 &&
-    constructingCount(state) === 0
+    constructingOf(state, 'habitat') === 0
   ) {
     const habitat = trySolarThen(state, 'habitat', true);
     if (habitat) return habitat;
@@ -396,7 +407,7 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
     if (farm) return farm;
   }
 
-  if (projected.net < MIN_POWER_SURPLUS && solars < MAX_SOLAR) {
+  if (projected.net < MIN_POWER_SURPLUS && solars < MAX_SOLAR && habitats >= 2) {
     const keepSlotForFarm = farms < 3 && workforceRemaining(state) <= 1;
     if (!keepSlotForFarm || projected.net < 1) {
       const solar = tryPlace(state, 'solar', { nearWorkers: true });
@@ -408,7 +419,6 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
     countType(state, 'garage') > 0 &&
     countType(state, 'extractor') < MAX_EXTRACTORS &&
     constructingOf(state, 'extractor') === 0 &&
-    constructingCount(state) === 0 &&
     (farms >= 3 || state.colonists.length >= 3)
   ) {
     const extractor = trySolarThen(state, 'extractor');
