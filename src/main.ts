@@ -311,16 +311,21 @@ function liveSpeed(): { speed: number } {
   return { speed: gameSettings.getState().speed };
 }
 
-function persistTickOptions(): { speed: number; maxTicks: number } {
+function persistTickOptions(): { speed: number; maxTicks: number; projectedTick: number } {
   const speed = gameSettings.getState().speed;
-  return { speed, maxTicks: Math.max(12, speed * 6) };
+  const projectedTick = store.getState().tick;
+  if (activeColonyId) {
+    colonyService.rememberProjectedTick(activeColonyId, projectedTick);
+  }
+  return { speed, maxTicks: Math.max(120, speed * 6), projectedTick };
 }
 
-function awayTickOptions(): { skipCatchUp: true } | { speed: number } {
+function awayTickOptions(): { speed: number; maxTicks: number; projectedTick: number; skipCatchUp?: true } {
+  const persist = persistTickOptions();
   if (gameSettings.getState().alwaysPassTime && !isUiPaused()) {
-    return liveSpeed();
+    return persist;
   }
-  return { skipCatchUp: true };
+  return { skipCatchUp: true, ...persist };
 }
 
 async function flushAuthoritativeTicks(): Promise<void> {
@@ -455,6 +460,9 @@ function startSimulationLoops(userId: string): void {
     const state = store.getState();
     if (state.status === 'active') {
       store.advanceTicks(1);
+      if (activeColonyId) {
+        colonyService.rememberProjectedTick(activeColonyId, store.getState().tick);
+      }
       maybeRunAutopilot();
     } else {
       stopSimulationLoops();
@@ -510,7 +518,9 @@ window.addEventListener('online', async () => {
       const updatedData = await colonyService.triggerServerTick(
         activeColonyId,
         activeUserId,
-        isUiPaused() || !gameSettings.getState().alwaysPassTime ? { skipCatchUp: true } : persistTickOptions()
+        isUiPaused() || !gameSettings.getState().alwaysPassTime
+          ? { skipCatchUp: true, ...persistTickOptions() }
+          : persistTickOptions()
       );
       store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
       telemetryBanner.setState('hidden');
@@ -534,12 +544,11 @@ document.addEventListener('visibilitychange', async () => {
 
   if (document.hidden) {
     stopSimulationLoops();
-    colonyService.flushTicksKeepalive(activeColonyId, awayTickOptions());
+    colonyService.flushTicksKeepalive(activeColonyId, persistTickOptions());
     await enqueueTickSync(async () => {
       try {
-        if (gameSettings.getState().alwaysPassTime) {
-          await flushAuthoritativeTicks();
-        } else {
+        await flushAuthoritativeTicks();
+        if (!gameSettings.getState().alwaysPassTime) {
           await freezeTickClock();
         }
       } catch (err) {

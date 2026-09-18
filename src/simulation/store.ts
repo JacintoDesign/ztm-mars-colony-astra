@@ -163,8 +163,6 @@ export class ColonyStore {
     const isDifferentColony = !this.state.colonyId || this.state.colonyId !== data.colony.id;
     const isRestart = data.colony.status === 'active' && (data.colony.tick === 0 || this.state.status === 'game_over');
     const serverTick = data.colony.tick ?? 0;
-    // Projection may sit ahead of a stale persist. Never rewind an in-session
-    // colony; only restarts and colony switches may drop the counter.
     if (!isDifferentColony && !isRestart && serverTick < this.state.tick) {
       return;
     }

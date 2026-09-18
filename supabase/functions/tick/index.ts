@@ -34,7 +34,7 @@ serve(async (req) => {
       });
     }
 
-    const { colonyId, skipCatchUp, speed, maxTicks } = await req.json();
+    const { colonyId, skipCatchUp, speed, maxTicks, projectedTick } = await req.json();
     if (!colonyId) {
       return new Response(JSON.stringify({ error: 'Missing colonyId' }), {
         status: 400,
@@ -47,6 +47,7 @@ serve(async (req) => {
       skipCatchUp: Boolean(skipCatchUp),
       speed: typeof speed === 'number' ? speed : 1,
       maxTicks: typeof maxTicks === 'number' ? maxTicks : undefined,
+      projectedTick: typeof projectedTick === 'number' ? projectedTick : undefined,
     });
 
     return new Response(

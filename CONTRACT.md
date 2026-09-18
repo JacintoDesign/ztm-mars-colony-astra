@@ -15,7 +15,7 @@
 ## Simulation Rules
 
 ### Tick
-- Tick interval: 1 second of real time at 1×. Simulation speed 2×/3× multiplies ticks applied while the page is open. Those sped-up ticks are persisted on the authoritative server tick (and on every player action). Refreshing reloads the saved tick count. Catch-up while the page is closed/hidden remains 1× wall-clock (when time-passing-while-away is on) and does not use the HUD speed multiplier.
+- Tick interval: 1 second of real time at 1×. Simulation speed 2×/3× multiplies ticks applied while the page is open. Those sped-up ticks are persisted on the authoritative server tick (and on every player action), including the client's live projected tick so a refresh cannot rewind past the HUD. Catch-up while the page is closed/hidden remains 1× wall-clock (when time-passing-while-away is on) and does not use the HUD speed multiplier.
 - lastTickAt stored with colony state
 - Applying N ticks in one batch must produce exactly the same state as applying N ticks one at a time
 - Every random-seeming decision in this document — building breakage, storm timing and target, asteroid timing and position, ore distribution at creation, movement tie-breaks — draws from the same seeded generator stored in colony state, never Math.random(). This is what makes the line above possible for a system with this many moving parts, not just the tick arithmetic itself

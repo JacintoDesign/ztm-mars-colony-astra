@@ -20,6 +20,8 @@ import {
 } from './server-simulation';
 import { CONTRACT_RULES } from '../simulation/contract-rules';
 
+const PROJECTED_TICK_KEY = 'mars-colony-projected-tick';
+
 export interface ColonyRecord {
   id: string;
   owner: string;
@@ -60,6 +62,37 @@ export class ColonyService {
     void supabase.auth.getSession().then(({ data }) => {
       this.accessToken = data.session?.access_token ?? this.accessToken;
     });
+  }
+
+  public rememberProjectedTick(colonyId: string, tick: number): void {
+    if (!colonyId || !Number.isFinite(tick)) return;
+    try {
+      sessionStorage.setItem(PROJECTED_TICK_KEY, JSON.stringify({ colonyId, tick: Math.floor(tick) }));
+    } catch {
+      // Private mode / blocked storage
+    }
+  }
+
+  private readRememberedProjectedTick(colonyId: string): number | undefined {
+    try {
+      const raw = sessionStorage.getItem(PROJECTED_TICK_KEY);
+      if (!raw) return undefined;
+      const parsed = JSON.parse(raw) as { colonyId?: string; tick?: number };
+      if (parsed?.colonyId === colonyId && typeof parsed.tick === 'number' && Number.isFinite(parsed.tick)) {
+        return Math.floor(parsed.tick);
+      }
+    } catch {
+      // Ignore unreadable storage
+    }
+    return undefined;
+  }
+
+  private withProjectedTick(colonyId: string, options?: AuthoritativeTickOptions): AuthoritativeTickOptions {
+    const projectedTick = options?.projectedTick ?? this.readRememberedProjectedTick(colonyId);
+    if (projectedTick != null) {
+      this.rememberProjectedTick(colonyId, projectedTick);
+    }
+    return { ...options, projectedTick };
   }
 
   /**
@@ -249,7 +282,7 @@ export class ColonyService {
     }
 
     // 3. Authoritative server tick execution on load (catch-up calculation and state persistence)
-    return await this.triggerServerTick(colonyId, userId, tickOptions);
+    return await this.triggerServerTick(colonyId, userId, this.withProjectedTick(colonyId, tickOptions));
   }
 
   /**
@@ -260,6 +293,7 @@ export class ColonyService {
     userId: string,
     options?: AuthoritativeTickOptions
   ): Promise<ColonyData> {
+    options = this.withProjectedTick(colonyId, options);
     if (!import.meta.env.DEV) {
       try {
         const { data, error } = await supabase.functions.invoke('tick', {
@@ -268,6 +302,7 @@ export class ColonyService {
             skipCatchUp: options?.skipCatchUp ?? false,
             speed: options?.speed ?? 1,
             maxTicks: options?.maxTicks,
+            projectedTick: options?.projectedTick,
           },
         });
         if (!error && data?.colonyData && !data.error) {
@@ -286,6 +321,7 @@ export class ColonyService {
    * Uses fetch keepalive so the request is not cancelled on unload.
    */
   public flushTicksKeepalive(colonyId: string, options?: AuthoritativeTickOptions): void {
+    options = this.withProjectedTick(colonyId, options);
     const token = this.accessToken ?? SUPABASE_ANON_KEY;
     if (!SUPABASE_URL || !token || !colonyId) return;
     try {
@@ -301,6 +337,7 @@ export class ColonyService {
           skipCatchUp: options?.skipCatchUp ?? false,
           speed: options?.speed ?? 1,
           maxTicks: options?.maxTicks,
+          projectedTick: options?.projectedTick,
         }),
         keepalive: true,
       });
@@ -319,6 +356,7 @@ export class ColonyService {
     action: SimulationAction,
     options?: AuthoritativeTickOptions
   ): Promise<{ success: boolean; reason?: string; colonyData: ColonyData }> {
+    options = this.withProjectedTick(colonyId, options);
     if (!import.meta.env.DEV) {
       try {
         const { data, error } = await supabase.functions.invoke('action', {
@@ -328,6 +366,7 @@ export class ColonyService {
             speed: options?.speed ?? 1,
             maxTicks: options?.maxTicks,
             skipCatchUp: options?.skipCatchUp ?? false,
+            projectedTick: options?.projectedTick,
           },
         });
         if (!error && data && data.colonyData) {

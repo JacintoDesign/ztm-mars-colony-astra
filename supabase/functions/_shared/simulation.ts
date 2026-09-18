@@ -1368,7 +1368,7 @@ export async function executeAuthoritativeTick(
   client: any,
   colonyId: string,
   userId: string,
-  options?: { skipCatchUp?: boolean; speed?: number; maxTicks?: number }
+  options?: { skipCatchUp?: boolean; speed?: number; maxTicks?: number; projectedTick?: number }
 ): Promise<ColonyData> {
   let bestSolsSurvived = 0;
   const { data: userProfile } = await client
@@ -1487,33 +1487,19 @@ export async function executeAuthoritativeTick(
     };
   }
 
-  if (options?.skipCatchUp) {
-    const nowIso = new Date().toISOString();
-    await client
-      .from('marscolony_colonies')
-      .update({ last_tick_at: nowIso, updated_at: nowIso })
-      .eq('id', colonyId)
-      .eq('owner', userId);
-    colony.last_tick_at = nowIso;
-    return {
-      colony,
-      buildings,
-      colonists,
-      rovers,
-      oreDeposits,
-      bestSolsSurvived,
-    };
-  }
-
   const speed = Math.max(1, Math.min(3, Math.floor(options?.speed ?? 1)));
   const lastTickTime = colony.last_tick_at ? new Date(colony.last_tick_at).getTime() : Date.now();
   const now = Date.now();
   const elapsedSeconds = Math.max(0, (now - lastTickTime) / 1000);
-  const catchUpCap =
+  const elapsedCap =
     options?.maxTicks != null
       ? Math.min(CONTRACT_RULES.maxCatchUpTicks, Math.max(0, Math.floor(options.maxTicks)))
       : CONTRACT_RULES.maxCatchUpTicks;
-  const ticksToApply = Math.min(Math.floor(elapsedSeconds * speed), catchUpCap);
+  const fromElapsed = options?.skipCatchUp ? 0 : Math.min(Math.floor(elapsedSeconds * speed), elapsedCap);
+  const projectedTick =
+    (colony.tick ?? 0) > 0 && options?.projectedTick != null ? Math.floor(options.projectedTick) : null;
+  const fromProjection = projectedTick != null ? Math.max(0, projectedTick - colony.tick) : 0;
+  const ticksToApply = Math.min(Math.max(fromElapsed, fromProjection), CONTRACT_RULES.maxCatchUpTicks);
 
   if (colony.status === 'active' && ticksToApply > 0) {
     const currentState: ColonyState = {
@@ -1753,6 +1739,16 @@ export async function executeAuthoritativeTick(
     };
   }
 
+  if (options?.skipCatchUp) {
+    const nowIso = new Date().toISOString();
+    await client
+      .from('marscolony_colonies')
+      .update({ last_tick_at: nowIso, updated_at: nowIso })
+      .eq('id', colonyId)
+      .eq('owner', userId);
+    colony.last_tick_at = nowIso;
+  }
+
   return {
     colony,
     buildings,
@@ -1768,12 +1764,13 @@ export async function executeAuthoritativeAction(
   colonyId: string,
   userId: string,
   action: SimulationAction,
-  options?: { skipCatchUp?: boolean; speed?: number; maxTicks?: number }
+  options?: { skipCatchUp?: boolean; speed?: number; maxTicks?: number; projectedTick?: number }
 ): Promise<{ success: boolean; reason?: string; colonyData: ColonyData }> {
   const currentData = await executeAuthoritativeTick(client, colonyId, userId, {
     speed: options?.speed,
     maxTicks: options?.maxTicks,
     skipCatchUp: options?.skipCatchUp,
+    projectedTick: options?.projectedTick,
   });
   const colony = currentData.colony;
   const buildings = currentData.buildings;

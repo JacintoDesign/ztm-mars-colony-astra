@@ -34,7 +34,7 @@ serve(async (req) => {
       });
     }
 
-    const { colonyId, action, speed, maxTicks, skipCatchUp } = await req.json();
+    const { colonyId, action, speed, maxTicks, skipCatchUp, projectedTick } = await req.json();
     if (!colonyId || !action) {
       return new Response(JSON.stringify({ error: 'Missing colonyId or action payload' }), {
         status: 400,
@@ -47,6 +47,7 @@ serve(async (req) => {
       speed: typeof speed === 'number' ? speed : 1,
       maxTicks: typeof maxTicks === 'number' ? maxTicks : undefined,
       skipCatchUp: Boolean(skipCatchUp),
+      projectedTick: typeof projectedTick === 'number' ? projectedTick : undefined,
     });
 
     return new Response(
