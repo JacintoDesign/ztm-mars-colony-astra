@@ -78,15 +78,19 @@ export async function executeAuthoritativeTick(
     throw new Error(`Failed to query buildings: ${buildingsError.message}`);
   }
 
-  const buildings: Building[] = (buildingsData || []).map((b) => buildingFromRow(b));
+  let buildings: Building[] = (buildingsData || []).map((b) => buildingFromRow(b));
 
   // 4. Fetch colonists
-  const { data: colonistsData } = await client
+  const { data: colonistsData, error: colonistsError } = await client
     .from('marscolony_colonists')
     .select('*')
     .eq('colony_id', colonyId);
 
-  const colonists: Colonist[] = (colonistsData || []).map((c) => ({
+  if (colonistsError) {
+    throw new Error(`Failed to query colonists: ${colonistsError.message}`);
+  }
+
+  let colonists: Colonist[] = (colonistsData || []).map((c) => ({
     id: c.id,
     x: c.x,
     y: c.y,
@@ -158,8 +162,54 @@ export async function executeAuthoritativeTick(
     };
   }
 
-  // An established colony never has zero structures. Empty fetch is a query failure — do not simulate a barren map into game_over.
-  if ((colony.tick ?? 0) > 0 && buildings.length === 0) {
+  // An established colony never has zero structures or zero colonists. Empty fetch is a query failure — do not simulate a barren map into game_over.
+  if (colony.status === 'active' && (colony.tick ?? 0) > 0 && (buildings.length === 0 || colonists.length === 0)) {
+    if (buildings.length === 0) {
+      const { data: retryBuildings, error: retryBuildingsError } = await client
+        .from('marscolony_buildings')
+        .select('*')
+        .eq('colony_id', colonyId)
+        .order('created_at', { ascending: true });
+      if (retryBuildingsError) {
+        throw new Error(`Failed to query buildings: ${retryBuildingsError.message}`);
+      }
+      buildings = (retryBuildings || []).map((b) => buildingFromRow(b));
+    }
+    if (colonists.length === 0) {
+      const { data: retryColonists, error: retryColonistsError } = await client
+        .from('marscolony_colonists')
+        .select('*')
+        .eq('colony_id', colonyId);
+      if (retryColonistsError) {
+        throw new Error(`Failed to query colonists: ${retryColonistsError.message}`);
+      }
+      colonists = (retryColonists || []).map((c) => ({
+        id: c.id,
+        x: c.x,
+        y: c.y,
+        health: c.health,
+        age: c.age ?? 0,
+        lifespan: c.lifespan ?? 15000,
+        destination: c.destination,
+        destinationType: c.destination_type ?? 'habitat',
+        targetEntityId: null,
+        route: c.route || [],
+      }));
+    }
+    if (buildings.length === 0 || colonists.length === 0) {
+      throw new Error('Incomplete colony snapshot');
+    }
+  }
+
+  // 7. Authoritative Simulation Ticks Computation
+  if (options?.skipCatchUp) {
+    const nowIso = new Date().toISOString();
+    await client
+      .from('marscolony_colonies')
+      .update({ last_tick_at: nowIso, updated_at: nowIso })
+      .eq('id', colonyId)
+      .eq('owner', userId);
+    colony.last_tick_at = nowIso;
     return {
       colony,
       buildings,
@@ -169,8 +219,6 @@ export async function executeAuthoritativeTick(
       bestSolsSurvived,
     };
   }
-
-  // 7. Authoritative Simulation Ticks Computation
   const speed = Math.max(1, Math.min(3, Math.floor(options?.speed ?? 1)));
   const lastTickTime = colony.last_tick_at ? new Date(colony.last_tick_at).getTime() : Date.now();
   const now = Date.now();
@@ -179,11 +227,11 @@ export async function executeAuthoritativeTick(
     options?.maxTicks != null
       ? Math.min(CONTRACT_RULES.maxCatchUpTicks, Math.max(0, Math.floor(options.maxTicks)))
       : CONTRACT_RULES.maxCatchUpTicks;
-  const fromElapsed = options?.skipCatchUp ? 0 : Math.min(Math.floor(elapsedSeconds * speed), elapsedCap);
+  const fromElapsed = Math.min(Math.floor(elapsedSeconds * speed), elapsedCap);
   const projectedTick =
     (colony.tick ?? 0) > 0 && options?.projectedTick != null ? Math.floor(options.projectedTick) : null;
   const fromProjection = projectedTick != null ? Math.max(0, projectedTick - colony.tick) : 0;
-  const ticksToApply = Math.min(Math.max(fromElapsed, fromProjection), CONTRACT_RULES.maxCatchUpTicks);
+  const ticksToApply = Math.min(Math.max(fromElapsed, fromProjection), elapsedCap);
 
   if (colony.status === 'active' && ticksToApply > 0) {
     const currentState: ColonyState = {
@@ -252,6 +300,16 @@ export async function executeAuthoritativeTick(
 
     // If colony just terminated (reached game_over), record best sols and persist terminal state
     if (nextState.status === 'game_over') {
+      if (colonists.length === 0) {
+        return {
+          colony,
+          buildings,
+          colonists,
+          rovers,
+          oreDeposits,
+          bestSolsSurvived,
+        };
+      }
       const solsSurvived = Math.floor(nextState.tick / CONTRACT_RULES.ticksPerSol);
       if (solsSurvived > bestSolsSurvived) {
         bestSolsSurvived = solsSurvived;
@@ -426,16 +484,6 @@ export async function executeAuthoritativeTick(
       oreDeposits: nextState.oreDeposits,
       bestSolsSurvived,
     };
-  }
-
-  if (options?.skipCatchUp) {
-    const nowIso = new Date().toISOString();
-    await client
-      .from('marscolony_colonies')
-      .update({ last_tick_at: nowIso, updated_at: nowIso })
-      .eq('id', colonyId)
-      .eq('owner', userId);
-    colony.last_tick_at = nowIso;
   }
 
   return {

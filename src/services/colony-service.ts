@@ -88,6 +88,9 @@ export class ColonyService {
   }
 
   private withProjectedTick(colonyId: string, options?: AuthoritativeTickOptions): AuthoritativeTickOptions {
+    if (options?.skipCatchUp) {
+      return { ...options };
+    }
     const projectedTick = options?.projectedTick ?? this.readRememberedProjectedTick(colonyId);
     if (projectedTick != null) {
       this.rememberProjectedTick(colonyId, projectedTick);
