@@ -185,6 +185,7 @@ export type SimulationAction =
 
 export const CONTRACT_RULES = {
   ticksPerSol: 1000,
+  persistCheckpointTicks: 100,
   maxCatchUpTicks: 28800,
   starting: {
     oxygen: 50,
@@ -1655,35 +1656,39 @@ export async function executeAuthoritativeTick(
       };
     }
 
-    for (const b of nextState.buildings) {
-      if (b.id && !b.id.startsWith('bld-')) {
-        await client
-          .from('marscolony_buildings')
-          .update(buildingPersistFields(b))
-          .eq('id', b.id);
-      }
-    }
+    await Promise.all(
+      nextState.buildings
+        .filter((b) => b.id && !b.id.startsWith('bld-'))
+        .map((b) =>
+          client
+            .from('marscolony_buildings')
+            .update(buildingPersistFields(b))
+            .eq('id', b.id)
+        )
+    );
 
     // 8c. Sync living colonists idempotently without race condition duplications
     if (nextState.colonists.length > 0) {
       const existingWithId = nextState.colonists.filter((c) => c.id && !c.id.startsWith('col-'));
       const newWithoutId = nextState.colonists.filter((c) => !c.id || c.id.startsWith('col-'));
 
-      for (const c of existingWithId) {
-        await client
-          .from('marscolony_colonists')
-          .update({
-            x: c.x,
-            y: c.y,
-            health: c.health,
-            age: c.age,
-            lifespan: c.lifespan,
-            destination: c.destination,
-            destination_type: persistableDestinationType(c.destinationType),
-            route: c.route || [],
-          })
-          .eq('id', c.id);
-      }
+      await Promise.all(
+        existingWithId.map((c) =>
+          client
+            .from('marscolony_colonists')
+            .update({
+              x: c.x,
+              y: c.y,
+              health: c.health,
+              age: c.age,
+              lifespan: c.lifespan,
+              destination: c.destination,
+              destination_type: persistableDestinationType(c.destinationType),
+              route: c.route || [],
+            })
+            .eq('id', c.id)
+        )
+      );
 
       const keepIds = existingWithId.map((c) => c.id);
       if (keepIds.length > 0) {
@@ -1726,22 +1731,24 @@ export async function executeAuthoritativeTick(
       const existingRoversWithId = nextState.rovers.filter((r) => r.id && !r.id.startsWith('rov-'));
       const newRoversWithoutId = nextState.rovers.filter((r) => !r.id || r.id.startsWith('rov-'));
 
-      for (const r of existingRoversWithId) {
-        await client
-          .from('marscolony_rovers')
-          .update({
-            garage_x: r.garageX,
-            garage_y: r.garageY,
-            x: r.x,
-            y: r.y,
-            state: r.state,
-            power: r.power,
-            cargo: r.cargo,
-            destination: r.destination,
-            route: r.route || [],
-          })
-          .eq('id', r.id);
-      }
+      await Promise.all(
+        existingRoversWithId.map((r) =>
+          client
+            .from('marscolony_rovers')
+            .update({
+              garage_x: r.garageX,
+              garage_y: r.garageY,
+              x: r.x,
+              y: r.y,
+              state: r.state,
+              power: r.power,
+              cargo: r.cargo,
+              destination: r.destination,
+              route: r.route || [],
+            })
+            .eq('id', r.id)
+        )
+      );
 
       if (newRoversWithoutId.length > 0) {
         const rovRows = newRoversWithoutId.map((r) => ({
@@ -1766,14 +1773,19 @@ export async function executeAuthoritativeTick(
         .eq('colony_id', colonyId);
     }
 
-    for (const dep of nextState.oreDeposits) {
-      if (dep.id) {
-        await client
-          .from('marscolony_ore_deposits')
-          .update({ remaining: dep.remaining, updated_at: newLastTickAt })
-          .eq('id', dep.id);
-      }
-    }
+    const previousRemaining = new Map(
+      oreDeposits.filter((d) => d.id).map((d) => [d.id as string, d.remaining])
+    );
+    await Promise.all(
+      nextState.oreDeposits
+        .filter((dep) => dep.id && previousRemaining.get(dep.id) !== dep.remaining)
+        .map((dep) =>
+          client
+            .from('marscolony_ore_deposits')
+            .update({ remaining: dep.remaining, updated_at: newLastTickAt })
+            .eq('id', dep.id)
+        )
+    );
 
     colony.oxygen = nextState.oxygen;
     colony.power = nextState.power;

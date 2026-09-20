@@ -16,6 +16,7 @@ import { BuildingInspector } from './ui/building-inspector';
 import { MissionAdvisor } from './ui/mission-advisor';
 import { authManager, AuthState } from './services/auth-manager';
 import { colonyService } from './services/colony-service';
+import { CONTRACT_RULES } from './simulation/contract-rules';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 // Initialize simulation store
@@ -276,10 +277,32 @@ let serverSyncInterval: number | null = null;
 let serverSyncTimeout: number | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 let lastAutopilotTick = -1;
+let lastPersistCheckpoint = 0;
+let persistInFlight = false;
 let tickSyncChain: Promise<void> = Promise.resolve();
+const TICK_SYNC_TIMEOUT_MS = 15000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('Tick sync timed out')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 function enqueueTickSync(work: () => Promise<void>): Promise<void> {
-  const run = tickSyncChain.then(work, work);
+  const run = tickSyncChain.then(
+    () => withTimeout(work(), TICK_SYNC_TIMEOUT_MS),
+    () => withTimeout(work(), TICK_SYNC_TIMEOUT_MS)
+  );
   tickSyncChain = run.then(
     () => undefined,
     () => undefined
@@ -313,7 +336,7 @@ function persistTickOptions(): { speed: number; maxTicks: number; projectedTick:
   if (activeColonyId) {
     colonyService.rememberProjectedTick(activeColonyId, projectedTick);
   }
-  return { speed, maxTicks: Math.max(120, speed * 6), projectedTick };
+  return { speed, maxTicks: Math.max(CONTRACT_RULES.persistCheckpointTicks, 120, speed * 6), projectedTick };
 }
 
 async function flushAuthoritativeTicks(): Promise<void> {
@@ -441,6 +464,7 @@ function startSimulationLoops(userId: string): void {
   const settings = gameSettings.getState();
   const tickMs = Math.round(1000 / settings.speed);
   if (lastAutopilotTick > store.getState().tick) lastAutopilotTick = -1;
+  lastPersistCheckpoint = store.getState().tick;
 
   // 1. Client-side projection (Display only)
   clientProjectionInterval = window.setInterval(() => {
@@ -448,10 +472,16 @@ function startSimulationLoops(userId: string): void {
     const state = store.getState();
     if (state.status === 'active') {
       store.advanceTicks(1);
+      const tick = store.getState().tick;
       if (activeColonyId) {
-        colonyService.rememberProjectedTick(activeColonyId, store.getState().tick);
+        colonyService.rememberProjectedTick(activeColonyId, tick);
       }
       maybeRunAutopilot();
+      const checkpoint = CONTRACT_RULES.persistCheckpointTicks;
+      if (tick > 0 && Math.floor(tick / checkpoint) > Math.floor(lastPersistCheckpoint / checkpoint)) {
+        lastPersistCheckpoint = tick;
+        void runAuthoritativeSync(userId);
+      }
     } else {
       stopSimulationLoops();
     }
@@ -466,22 +496,29 @@ function startSimulationLoops(userId: string): void {
 }
 
 async function runAuthoritativeSync(userId: string): Promise<void> {
-  await enqueueTickSync(async () => {
-    if (isUiPaused() || document.hidden) return;
-    if (store.getState().status !== 'active') {
-      stopSimulationLoops();
-      return;
-    }
-    if (activeColonyId && activeUserId === userId) {
-      try {
-        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, persistTickOptions());
-        store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
-        maybeRunAutopilot();
-      } catch (err) {
-        console.warn('Authoritative periodic server tick sync failed:', err);
+  if (persistInFlight) return;
+  persistInFlight = true;
+  try {
+    await enqueueTickSync(async () => {
+      if (isUiPaused() || document.hidden) return;
+      if (store.getState().status !== 'active') {
+        stopSimulationLoops();
+        return;
       }
-    }
-  });
+      if (activeColonyId && activeUserId === userId) {
+        try {
+          const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, persistTickOptions());
+          store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+          lastPersistCheckpoint = Math.max(lastPersistCheckpoint, updatedData.colony.tick ?? 0);
+          maybeRunAutopilot();
+        } catch (err) {
+          console.warn('Authoritative periodic server tick sync failed:', err);
+        }
+      }
+    });
+  } finally {
+    persistInFlight = false;
+  }
 }
 
 function stopSimulationLoops(): void {

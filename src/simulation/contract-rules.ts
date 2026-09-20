@@ -22,6 +22,7 @@ export type RoverDestinationType = 'mining_site' | 'asteroid' | 'landing_zone';
 export const CONTRACT_RULES = {
   // Tick & Sol timing
   ticksPerSol: 1000,
+  persistCheckpointTicks: 100,
   maxCatchUpTicks: 28800, // 8 hours
 
   // Starting values
