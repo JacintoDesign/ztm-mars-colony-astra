@@ -336,7 +336,7 @@ function persistTickOptions(): { speed: number; maxTicks: number; projectedTick:
   if (activeColonyId) {
     colonyService.rememberProjectedTick(activeColonyId, projectedTick);
   }
-  return { speed, maxTicks: Math.max(CONTRACT_RULES.persistCheckpointTicks, 120, speed * 6), projectedTick };
+  return { speed, maxTicks: Math.max(8, speed * 8), projectedTick };
 }
 
 async function flushAuthoritativeTicks(): Promise<void> {
@@ -594,7 +594,7 @@ document.addEventListener('visibilitychange', async () => {
       if (settings.alwaysPassTime && !isUiPaused() && activeColonyId && activeUserId) {
         const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
           speed: 1,
-          maxTicks: 120,
+          maxTicks: 8,
         });
         store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
       } else if (activeColonyId && activeUserId) {
@@ -673,7 +673,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
     const colonyData = await colonyService.loadOrCreateColony(user.id, {
       skipCatchUp: !gameSettings.getState().alwaysPassTime,
       speed: 1,
-      maxTicks: 120,
+      maxTicks: 8,
     });
     activeUserId = user.id;
     activeColonyId = colonyData.colony.id;
