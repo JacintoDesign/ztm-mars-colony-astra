@@ -17,6 +17,7 @@ import { MissionAdvisor } from './ui/mission-advisor';
 import { authManager, AuthState } from './services/auth-manager';
 import { colonyService } from './services/colony-service';
 import { CONTRACT_RULES } from './simulation/contract-rules';
+import type { SimulationAction } from './simulation/types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 // Initialize simulation store
@@ -84,14 +85,8 @@ gameSettings.hideControls();
 // Dedicated action handlers invoked from contextual Building Inspector Cards & Map Beacons
 const handleRefineCell = async () => {
   if (!activeColonyId || !activeUserId) return;
-    const res = await colonyService.executeServerAction(
-      activeColonyId,
-      activeUserId,
-      { type: 'REFINE_CELL' },
-      persistTickOptions()
-    );
+  const res = await executeAndReconcileAction({ type: 'REFINE_CELL' });
   if (res.success) {
-    store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
     toolbar.setStatus('Cell Refined (+1 Battery Cell)', 'nominal');
   } else {
     toolbar.setStatus(res.reason ? `Refine Failed: ${res.reason}` : 'Refine Failed', 'warning');
@@ -111,14 +106,13 @@ const handleDispatchEscort = async () => {
     return;
   }
 
-  const res = await colonyService.executeServerAction(activeColonyId, activeUserId, {
+  const res = await executeAndReconcileAction({
     type: 'DISPATCH_ROVER',
     roverId: idleRover.id,
     destinationType: 'landing_zone',
-  }, persistTickOptions());
+  });
 
   if (res.success) {
-    store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
     toolbar.setStatus('Rover Dispatched to Landing Zone (0,0)', 'nominal');
   } else {
     toolbar.setStatus(res.reason ? `Dispatch Failed: ${res.reason}` : 'Dispatch Failed', 'warning');
@@ -146,15 +140,14 @@ const handleDispatchMining = async () => {
     targetTile = { x: state.activeAsteroid.x, y: state.activeAsteroid.y };
   }
 
-  const res = await colonyService.executeServerAction(activeColonyId, activeUserId, {
+  const res = await executeAndReconcileAction({
     type: 'DISPATCH_ROVER',
     roverId: idleRover.id,
     destinationType: destType,
     targetTile,
-  }, persistTickOptions());
+  });
 
   if (res.success) {
-    store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
     toolbar.setStatus(`Rover Dispatched to ${destType === 'asteroid' ? 'Asteroid' : 'Mining Site'}`, 'nominal');
   } else {
     toolbar.setStatus(res.reason ? `Dispatch Failed: ${res.reason}` : 'Dispatch Failed', 'warning');
@@ -280,29 +273,9 @@ let lastAutopilotTick = -1;
 let lastPersistCheckpoint = 0;
 let persistInFlight = false;
 let tickSyncChain: Promise<void> = Promise.resolve();
-const TICK_SYNC_TIMEOUT_MS = 15000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error('Tick sync timed out')), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
-}
 
 function enqueueTickSync(work: () => Promise<void>): Promise<void> {
-  const run = tickSyncChain.then(
-    () => withTimeout(work(), TICK_SYNC_TIMEOUT_MS),
-    () => withTimeout(work(), TICK_SYNC_TIMEOUT_MS)
-  );
+  const run = tickSyncChain.then(work, work);
   tickSyncChain = run.then(
     () => undefined,
     () => undefined
@@ -339,6 +312,29 @@ function persistTickOptions(): { speed: number; maxTicks: number; projectedTick:
   return { speed, maxTicks: Math.max(8, speed * 8), projectedTick };
 }
 
+async function executeAndReconcileAction(
+  action: SimulationAction
+): Promise<{ success: boolean; reason?: string }> {
+  let result: { success: boolean; reason?: string } = {
+    success: false,
+    reason: 'No active session',
+  };
+
+  await enqueueTickSync(async () => {
+    if (!activeColonyId || !activeUserId) return;
+    const response = await colonyService.executeServerAction(
+      activeColonyId,
+      activeUserId,
+      action,
+      persistTickOptions()
+    );
+    store.loadColonyData(response.colonyData, activeUserDisplay, { authoritative: true });
+    result = { success: response.success, reason: response.reason };
+  });
+
+  return result;
+}
+
 async function flushAuthoritativeTicks(): Promise<void> {
   if (!activeColonyId || !activeUserId) return;
   if (store.getState().status !== 'active') return;
@@ -372,9 +368,8 @@ const gameOverModal = new GameOverModal({
     toolbar.setStatus('Re-initializing Colony...', 'warning');
 
     try {
-      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, { type: 'RESTART_COLONY' }, persistTickOptions());
+      const res = await executeAndReconcileAction({ type: 'RESTART_COLONY' });
       if (res.success) {
-        store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
         lastAutopilotTick = store.getState().tick - 3;
         gameOverModal.hide();
         applySessionStatus();
@@ -688,11 +683,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
       if (!activeColonyId || !activeUserId) {
         return { success: false, reason: 'No active session' };
       }
-      const res = await colonyService.executeServerAction(activeColonyId, activeUserId, action, persistTickOptions());
-      if (res.success) {
-        store.loadColonyData(res.colonyData, activeUserDisplay, { authoritative: true });
-      }
-      return { success: res.success, reason: res.reason };
+      return await executeAndReconcileAction(action);
     });
 
     // Subscribe to realtime changes with connection status handling
