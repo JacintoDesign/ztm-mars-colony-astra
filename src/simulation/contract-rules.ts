@@ -65,6 +65,7 @@ export const CONTRACT_RULES = {
     ticksPerTile: 5, // 5 ticks to walk from one tile to another
     oxygenConsumptionPerTick: 3,
     foodConsumptionPerTick: 3,
+    startupLifeSupportGraceTicks: 100,
     healthDamagePerTick: 2, // applied if oxygen == 0 OR power == 0 OR food == 0 (50-tick survival window)
     healthRecoveryPerTick: 1, // applied when oxygen > 0 AND power > 0 AND food > 0
     maxHealth: 100,

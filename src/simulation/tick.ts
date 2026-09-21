@@ -667,7 +667,8 @@ export function applySingleTick(state: ColonyState): ColonyState {
   const hasOxygenDeficit = nextOxygen === pools.oxygenMin && oxygenProduced < oxygenConsumed;
   const hasPowerDeficit = nextPower === pools.powerMin && powerProduced < powerDrawn;
   const hasFoodDeficit = nextFood === pools.foodMin && foodProduced < foodConsumed;
-  const isStarving = hasOxygenDeficit || hasPowerDeficit || hasFoodDeficit;
+  const isStartupGrace = nextTick <= (cSpecs.startupLifeSupportGraceTicks ?? 0);
+  const isStarving = !isStartupGrace && (hasOxygenDeficit || hasPowerDeficit || hasFoodDeficit);
   const updatedHealthColonists = currentColonists.map((c) => {
     const newHealth = isStarving
       ? Math.max(0, c.health - cSpecs.healthDamagePerTick)

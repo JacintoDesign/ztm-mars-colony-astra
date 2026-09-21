@@ -152,6 +152,11 @@ export class ColonyStore {
   }
 
   public loadState(newState: Partial<ColonyState>): void {
+    if (this.state.status === 'game_over' && newState.status === 'active') {
+      const terminalSafeState = { ...newState };
+      delete terminalSafeState.status;
+      newState = terminalSafeState;
+    }
     this.state = {
       ...this.state,
       ...newState,
@@ -159,10 +164,13 @@ export class ColonyStore {
     this.notify();
   }
 
-  public loadColonyData(data: { colony: any; buildings: Building[]; colonists: any[]; rovers: any[]; oreDeposits: any[]; bestSolsSurvived: number }, signedInAccount: string, options?: { authoritative?: boolean }): void {
+  public loadColonyData(data: { colony: any; buildings: Building[]; colonists: any[]; rovers: any[]; oreDeposits: any[]; bestSolsSurvived: number }, signedInAccount: string, options?: { authoritative?: boolean; allowRestart?: boolean }): void {
     const isDifferentColony = !this.state.colonyId || this.state.colonyId !== data.colony.id;
-    const isRestart = data.colony.status === 'active' && (data.colony.tick === 0 || this.state.status === 'game_over');
+    const isRestart = options?.allowRestart === true && data.colony.status === 'active';
     const serverTick = data.colony.tick ?? 0;
+    if (!isDifferentColony && this.state.status === 'game_over' && data.colony.status === 'active' && !isRestart) {
+      return;
+    }
     if (data.colony.status === 'active' && serverTick > 0 && (!data.buildings?.length || !data.colonists?.length)) {
       return;
     }

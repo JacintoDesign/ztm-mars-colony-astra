@@ -112,7 +112,7 @@ export class HelpModal {
               <p>• <strong>Construction:</strong> New structures are sites until a colonist walks adjacent and completes 6 ticks of on-site labor (faster than repairs). If a colonist is already next to the site, they work in place instead of walking away. Idle colonists spread across open sites. Starter buildings are already complete.</p>
               <p>• <strong>Consumption:</strong> Each colonist consumes <strong>3 O2</strong> and <strong>3 Food</strong> per tick.</p>
               <p>• <strong>Oxygen Storage:</strong> 100 base capacity + <strong>5 Max O2 per operational Scrubber</strong>.</p>
-              <p>• <strong>Life Support Failure:</strong> If Oxygen, Power, or Food reaches 0, colonists lose <strong>-2 HP/tick</strong> (50-tick survival window). Recovers <strong>+1 HP/tick</strong> when all pools are positive.</p>
+              <p>• <strong>Life Support Failure:</strong> The first 100 ticks are a startup grace period with no life-support health damage. Afterward, if Oxygen, Power, or Food reaches 0, colonists lose <strong>-2 HP/tick</strong> (50-tick survival window). Recovers <strong>+1 HP/tick</strong> when all pools are positive.</p>
               <p>• <strong>Game Over:</strong> Mission terminates if all colonists perish. 1 Sol = 1,000 ticks.</p>
             </div>
           </div>

@@ -102,6 +102,7 @@
 - For extractor specifically: placing an extractor on a dry tile (zero ore) is legal but pointless, and the game does not prevent it
 
 ### Health
+- Ticks 1–100 are a startup grace period: depleted life-support pools do not damage colonist health during this window
 - If oxygen is 0 OR power is 0 OR food is 0 at end of tick: every colonist loses 2 health (50-tick survival buffer)
 - Otherwise: colonists recover 1 health per tick, up to 100
 

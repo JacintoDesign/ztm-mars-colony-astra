@@ -328,7 +328,10 @@ async function executeAndReconcileAction(
       action,
       persistTickOptions()
     );
-    store.loadColonyData(response.colonyData, activeUserDisplay, { authoritative: true });
+    store.loadColonyData(response.colonyData, activeUserDisplay, {
+      authoritative: true,
+      allowRestart: action.type === 'RESTART_COLONY',
+    });
     result = { success: response.success, reason: response.reason };
   });
 
@@ -692,6 +695,9 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
       (payload) => {
         if (payload.new && payload.new.owner === user.id) {
           const row = payload.new;
+          const currentState = store.getState();
+          const realtimeStatus =
+            currentState.status === 'game_over' ? 'game_over' : row.status;
           store.loadState({
             oxygen: row.oxygen,
             power: row.power,
@@ -699,8 +705,8 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
             ore: row.ore,
             electronics: row.electronics,
             seed: row.seed,
-            tick: Math.max(store.getState().tick, row.tick),
-            status: row.status,
+            tick: Math.max(currentState.tick, row.tick),
+            status: realtimeStatus,
           });
         }
       },
