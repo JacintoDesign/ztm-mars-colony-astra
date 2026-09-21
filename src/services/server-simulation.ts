@@ -202,23 +202,7 @@ export async function executeAuthoritativeTick(
   }
 
   // 7. Authoritative Simulation Ticks Computation
-  if (options?.skipCatchUp) {
-    const nowIso = new Date().toISOString();
-    await client
-      .from('marscolony_colonies')
-      .update({ last_tick_at: nowIso, updated_at: nowIso })
-      .eq('id', colonyId)
-      .eq('owner', userId);
-    colony.last_tick_at = nowIso;
-    return {
-      colony,
-      buildings,
-      colonists,
-      rovers,
-      oreDeposits,
-      bestSolsSurvived,
-    };
-  }
+  // skipCatchUp = do not advance from wall-clock elapsed time (time-while-away off). HUD projection still persists.
   const speed = Math.max(1, Math.min(3, Math.floor(options?.speed ?? 1)));
   const lastTickTime = colony.last_tick_at ? new Date(colony.last_tick_at).getTime() : Date.now();
   const now = Date.now();
@@ -227,7 +211,9 @@ export async function executeAuthoritativeTick(
     options?.maxTicks != null
       ? Math.min(CONTRACT_RULES.maxCatchUpTicks, Math.max(0, Math.floor(options.maxTicks)))
       : CONTRACT_RULES.maxCatchUpTicks;
-  const fromElapsed = Math.min(Math.floor(elapsedSeconds * speed), elapsedCap);
+  const fromElapsed = options?.skipCatchUp
+    ? 0
+    : Math.min(Math.floor(elapsedSeconds * speed), elapsedCap);
   const projectedTick =
     (colony.tick ?? 0) > 0 && options?.projectedTick != null ? Math.floor(options.projectedTick) : null;
   const fromProjection = projectedTick != null ? Math.max(0, projectedTick - colony.tick) : 0;
@@ -512,6 +498,16 @@ export async function executeAuthoritativeTick(
       oreDeposits: nextState.oreDeposits,
       bestSolsSurvived,
     };
+  }
+
+  if (options?.skipCatchUp && colony.status === 'active') {
+    const nowIso = new Date().toISOString();
+    await client
+      .from('marscolony_colonies')
+      .update({ last_tick_at: nowIso, updated_at: nowIso })
+      .eq('id', colonyId)
+      .eq('owner', userId);
+    colony.last_tick_at = nowIso;
   }
 
   return {

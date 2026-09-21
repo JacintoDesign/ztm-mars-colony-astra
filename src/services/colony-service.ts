@@ -66,36 +66,75 @@ export class ColonyService {
 
   public rememberProjectedTick(colonyId: string, tick: number): void {
     if (!colonyId || !Number.isFinite(tick)) return;
+    const payload = JSON.stringify({ colonyId, tick: Math.floor(tick) });
     try {
-      sessionStorage.setItem(PROJECTED_TICK_KEY, JSON.stringify({ colonyId, tick: Math.floor(tick) }));
+      sessionStorage.setItem(PROJECTED_TICK_KEY, payload);
+    } catch {
+      // Private mode / blocked storage
+    }
+    try {
+      localStorage.setItem(PROJECTED_TICK_KEY, payload);
     } catch {
       // Private mode / blocked storage
     }
   }
 
-  private readRememberedProjectedTick(colonyId: string): number | undefined {
-    try {
-      const raw = sessionStorage.getItem(PROJECTED_TICK_KEY);
-      if (!raw) return undefined;
-      const parsed = JSON.parse(raw) as { colonyId?: string; tick?: number };
-      if (parsed?.colonyId === colonyId && typeof parsed.tick === 'number' && Number.isFinite(parsed.tick)) {
-        return Math.floor(parsed.tick);
+  public readRememberedProjectedTick(colonyId: string): number | undefined {
+    const storages = [sessionStorage, localStorage];
+    for (const storage of storages) {
+      try {
+        const raw = storage.getItem(PROJECTED_TICK_KEY);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as { colonyId?: string; tick?: number };
+        if (parsed?.colonyId === colonyId && typeof parsed.tick === 'number' && Number.isFinite(parsed.tick)) {
+          return Math.floor(parsed.tick);
+        }
+      } catch {
+        // Ignore unreadable storage
       }
-    } catch {
-      // Ignore unreadable storage
     }
     return undefined;
   }
 
   private withProjectedTick(colonyId: string, options?: AuthoritativeTickOptions): AuthoritativeTickOptions {
-    if (options?.skipCatchUp) {
-      return { ...options };
-    }
     const projectedTick = options?.projectedTick ?? this.readRememberedProjectedTick(colonyId);
     if (projectedTick != null) {
       this.rememberProjectedTick(colonyId, projectedTick);
     }
     return { ...options, projectedTick };
+  }
+
+  /**
+   * Runs authoritative tick sync until DB matches remembered HUD projection (batched by maxTicks).
+   * skipCatchUp only suppresses wall-clock elapsed catch-up, not projection persistence.
+   */
+  private async syncAuthoritativeState(
+    colonyId: string,
+    userId: string,
+    options?: AuthoritativeTickOptions
+  ): Promise<ColonyData> {
+    const checkpoint = CONTRACT_RULES.persistCheckpointTicks;
+    const merged = this.withProjectedTick(colonyId, {
+      ...options,
+      maxTicks: options?.maxTicks ?? checkpoint,
+    });
+    let data = await this.triggerServerTick(colonyId, userId, merged);
+
+    for (let i = 0; i < 30; i++) {
+      const dbTick = data.colony.tick ?? 0;
+      const remembered = this.readRememberedProjectedTick(colonyId);
+      const target = Math.max(dbTick, remembered ?? dbTick, merged.projectedTick ?? dbTick);
+      const gap = target - dbTick;
+      if (gap <= 0 || data.colony.status !== 'active') break;
+
+      data = await this.triggerServerTick(colonyId, userId, {
+        ...merged,
+        projectedTick: target,
+        maxTicks: Math.min(CONTRACT_RULES.maxCatchUpTicks, Math.max(checkpoint, gap)),
+      });
+    }
+
+    return data;
   }
 
   /**
@@ -285,7 +324,10 @@ export class ColonyService {
     }
 
     // 3. Authoritative server tick execution on load (catch-up calculation and state persistence)
-    return await this.triggerServerTick(colonyId, userId, this.withProjectedTick(colonyId, tickOptions));
+    return await this.syncAuthoritativeState(colonyId, userId, {
+      ...tickOptions,
+      maxTicks: tickOptions?.maxTicks ?? CONTRACT_RULES.persistCheckpointTicks,
+    });
   }
 
   /**

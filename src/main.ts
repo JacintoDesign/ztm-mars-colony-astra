@@ -363,8 +363,22 @@ async function executeAndReconcileAction(
 async function flushAuthoritativeTicks(): Promise<void> {
   if (!activeColonyId || !activeUserId) return;
   if (store.getState().status !== 'active') return;
-  const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, persistTickOptions());
-  reconcileAuthoritativeData(updatedData);
+  const checkpoint = CONTRACT_RULES.persistCheckpointTicks;
+  for (let i = 0; i < 25; i++) {
+    const projectedTick = store.getState().tick;
+    const updatedData = await colonyService.triggerServerTick(
+      activeColonyId,
+      activeUserId,
+      {
+        ...persistTickOptions(),
+        projectedTick,
+        maxTicks: Math.max(checkpoint, projectedTick),
+      }
+    );
+    reconcileAuthoritativeData(updatedData);
+    const dbTick = updatedData.colony.tick ?? 0;
+    if (updatedData.colony.status !== 'active' || dbTick >= projectedTick) break;
+  }
 }
 
 async function freezeTickClock(): Promise<void> {
@@ -560,7 +574,7 @@ window.addEventListener('online', async () => {
         activeColonyId,
         activeUserId,
         isUiPaused() || !gameSettings.getState().alwaysPassTime
-          ? { skipCatchUp: true }
+          ? { ...persistTickOptions(), skipCatchUp: true }
           : persistTickOptions()
       );
       reconcileAuthoritativeData(updatedData);
@@ -604,8 +618,8 @@ document.addEventListener('visibilitychange', async () => {
       const settings = gameSettings.getState();
       if (settings.alwaysPassTime && !isUiPaused() && activeColonyId && activeUserId) {
         const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, {
+          ...persistTickOptions(),
           speed: 1,
-          maxTicks: 8,
         });
         reconcileAuthoritativeData(updatedData);
       } else if (activeColonyId && activeUserId) {
@@ -678,7 +692,7 @@ async function handleAuthStateChange(authState: AuthState): Promise<void> {
     const colonyData = await colonyService.loadOrCreateColony(user.id, {
       skipCatchUp: !gameSettings.getState().alwaysPassTime,
       speed: 1,
-      maxTicks: 8,
+      maxTicks: CONTRACT_RULES.persistCheckpointTicks,
     });
     activeUserId = user.id;
     activeColonyId = colonyData.colony.id;
