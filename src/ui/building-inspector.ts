@@ -58,7 +58,7 @@ export class BuildingInspector {
       }
     });
 
-    // Keyboard shortcuts: P or Space to toggle power, M to relocate, Escape to close
+    // Keyboard shortcuts: P or Space to toggle power, M to relocate, D to demolish, Escape to close
     window.addEventListener('keydown', (e) => {
       if (!this.selectedBuildingId || this.container.style.display === 'none') return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -69,6 +69,9 @@ export class BuildingInspector {
       } else if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
         this.handleRelocate();
+      } else if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        this.handleDemolish();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         this.hide();
@@ -104,6 +107,13 @@ export class BuildingInspector {
   private handleRelocate(): void {
     if (!this.selectedBuildingId || this.selectedBuildingId === 'landing_pad') return;
     this.onRelocate(this.selectedBuildingId);
+  }
+
+  private handleDemolish(): void {
+    if (!this.selectedBuildingId || this.selectedBuildingId === 'landing_pad') return;
+    const id = this.selectedBuildingId;
+    this.hide();
+    if (this.onDemolish) this.onDemolish(id);
   }
 
   private handleMaintenance(): void {
@@ -370,7 +380,8 @@ export class BuildingInspector {
             </button>
 
             <button type="button" class="inspector-btn inspector-btn-demolish" id="inspector-demolish" ${state.power < 10 ? 'disabled' : ''}>
-              <span class="btn-icon">💥</span> DEMOLISH STRUCTURE (10 PWR)
+              <span class="btn-icon">💥</span> DEMOLISH
+              <span class="btn-shortcut">[D]</span>
             </button>
           </div>
         </div>
@@ -387,13 +398,7 @@ export class BuildingInspector {
     relocateBtn?.addEventListener('click', () => this.handleRelocate());
 
     const demolishBtn = this.container.querySelector<HTMLButtonElement>('#inspector-demolish');
-    demolishBtn?.addEventListener('click', () => {
-      if (this.selectedBuildingId && this.selectedBuildingId !== 'landing_pad') {
-        const id = this.selectedBuildingId;
-        this.hide();
-        if (this.onDemolish) this.onDemolish(id);
-      }
-    });
+    demolishBtn?.addEventListener('click', () => this.handleDemolish());
 
     const maintenanceBtn = this.container.querySelector<HTMLButtonElement>('#inspector-dispatch-maintenance');
     maintenanceBtn?.addEventListener('click', () => this.handleMaintenance());
