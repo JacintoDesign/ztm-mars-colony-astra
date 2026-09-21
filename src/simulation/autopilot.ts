@@ -185,12 +185,24 @@ function stillNeedsExtractorOre(state: ColonyState): boolean {
   const farmCost = CONTRACT_RULES.buildings.farm.cost.ore;
   const habitatCost = CONTRACT_RULES.buildings.habitat.cost.ore;
   const scrubberCost = CONTRACT_RULES.buildings.scrubber.cost.ore;
+  const garageCost = CONTRACT_RULES.buildings.garage.cost.ore;
+  if (countType(state, 'garage') === 0 && state.ore < garageCost) return true;
   if (countType(state, 'habitat') < 2 && state.ore < habitatCost) return true;
   if (countType(state, 'farm') < 4 && state.ore < farmCost) return true;
   if (countType(state, 'habitat') >= 2 && countType(state, 'scrubber') < 4 && state.ore < scrubberCost) {
     return true;
   }
   return false;
+}
+
+function tryPlaceExtractorOnOre(state: ColonyState): SimulationAction | null {
+  if (countType(state, 'extractor') >= MAX_EXTRACTORS || constructingOf(state, 'extractor') > 0) return null;
+  const extractor = trySolarThen(state, 'extractor');
+  if (extractor?.type === 'PLACE_BUILDING' && extractor.buildingType === 'extractor') {
+    const tile = findOpenTile(state, { preferOre: true, nearWorkers: true });
+    if (tile) return { type: 'PLACE_BUILDING', buildingType: 'extractor', x: tile.x, y: tile.y };
+  }
+  return extractor;
 }
 
 function tryRelocateExhaustedExtractor(state: ColonyState): SimulationAction | null {
@@ -348,9 +360,20 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
     if (solar) return solar;
   }
 
+  const hasGarage = countType(state, 'garage') > 0;
+  if (!hasGarage && constructingOf(state, 'garage') === 0) {
+    if (state.ore < CONTRACT_RULES.buildings.garage.cost.ore) {
+      const extractor = tryPlaceExtractorOnOre(state);
+      if (extractor) return extractor;
+    }
+    const garage = trySolarThen(state, 'garage', true);
+    if (garage) return garage;
+  }
+
   if ((foodShort || liveFood < liveFoodNeed) && constructingOf(state, 'farm') === 0) {
     const farmBroken = state.buildings.some((b) => b.type === 'farm' && b.condition === 'broken');
-    if (!farmBroken) {
+    const waitForGarage = farms >= 2 && !hasGarage && liveFood >= liveFoodNeed;
+    if (!farmBroken && !waitForGarage) {
       const farm = trySolarThen(state, 'farm');
       if (farm) return farm;
     }
@@ -388,22 +411,13 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
 
   if (liveO2 < liveO2Need) return null;
 
-  if (countType(state, 'garage') === 0) {
-    const garage = trySolarThen(state, 'garage', true);
-    if (garage) return garage;
-  }
-
   const needBeds = mouths + state.pendingArrivals.length >= habitatCapacity;
   const needExtractor =
-    countType(state, 'garage') > 0 &&
+    (hasGarage || stillNeedsExtractorOre(state)) &&
     countType(state, 'extractor') < MAX_EXTRACTORS &&
     constructingOf(state, 'extractor') === 0;
   if (needExtractor && (needBeds || stillNeedsExtractorOre(state) || state.ore < 10)) {
-    const extractor = trySolarThen(state, 'extractor');
-    if (extractor?.type === 'PLACE_BUILDING' && extractor.buildingType === 'extractor') {
-      const tile = findOpenTile(state, { preferOre: true, nearWorkers: true });
-      if (tile) return { type: 'PLACE_BUILDING', buildingType: 'extractor', x: tile.x, y: tile.y };
-    }
+    const extractor = tryPlaceExtractorOnOre(state);
     if (extractor) return extractor;
   }
 
@@ -416,7 +430,8 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
     if (habitat) return habitat;
   }
 
-  const wantBufferFarm = plannedPop >= 3 && farms < 3 && constructingOf(state, 'farm') === 0;
+  const wantBufferFarm =
+    hasGarage && plannedPop >= 3 && farms < 3 && constructingOf(state, 'farm') === 0;
   if (wantBufferFarm && !state.buildings.some((b) => b.type === 'farm' && b.condition === 'broken')) {
     const farm = trySolarThen(state, 'farm');
     if (farm) return farm;
@@ -431,16 +446,12 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
   }
 
   if (
-    countType(state, 'garage') > 0 &&
+    hasGarage &&
     countType(state, 'extractor') < MAX_EXTRACTORS &&
     constructingOf(state, 'extractor') === 0 &&
     (farms >= 3 || state.colonists.length >= 3)
   ) {
-    const extractor = trySolarThen(state, 'extractor');
-    if (extractor?.type === 'PLACE_BUILDING' && extractor.buildingType === 'extractor') {
-      const tile = findOpenTile(state, { preferOre: true, nearWorkers: true });
-      if (tile) return { type: 'PLACE_BUILDING', buildingType: 'extractor', x: tile.x, y: tile.y };
-    }
+    const extractor = tryPlaceExtractorOnOre(state);
     if (extractor) return extractor;
   }
 
