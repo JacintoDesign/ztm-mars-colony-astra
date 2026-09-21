@@ -734,6 +734,44 @@ function routeToLaborSite(
   return findShortestRoute(start, [{ x: target.x, y: target.y }, ...goals], new Set(['0,0']), 20);
 }
 
+function normalizeRoverDestination(dest: Rover['destination']): Rover['destination'] {
+  if (!dest) return dest;
+  const landing = dest.type === 'landing_zone';
+  return {
+    ...dest,
+    x: Number.isFinite(dest.x) ? dest.x : landing ? 0 : dest.x,
+    y: Number.isFinite(dest.y) ? dest.y : landing ? 0 : dest.y,
+    onSiteTicksTotal: Number.isFinite(dest.onSiteTicksTotal)
+      ? dest.onSiteTicksTotal
+      : CONTRACT_RULES.rovers.landingZoneLoadTicks,
+  };
+}
+
+function roverTravelGoal(rover: Rover): { x: number; y: number } | null {
+  if (rover.state === 'traveling_back') {
+    return { x: rover.garageX, y: rover.garageY };
+  }
+  if (rover.destination && Number.isFinite(rover.destination.x) && Number.isFinite(rover.destination.y)) {
+    return { x: rover.destination.x, y: rover.destination.y };
+  }
+  return null;
+}
+
+function ensureRoverRoute(rover: Rover): void {
+  const goal = roverTravelGoal(rover);
+  if (!goal) return;
+  if (rover.x === goal.x && rover.y === goal.y) {
+    rover.route = [];
+    return;
+  }
+  if (rover.route.length > 0) return;
+  rover.route = findShortestRoute({ x: rover.x, y: rover.y }, [goal], new Set(), 20);
+  if (rover.route.length === 0) {
+    rover.x = goal.x;
+    rover.y = goal.y;
+  }
+}
+
 function completeConstruction(
   building: Building,
   tick: number,
@@ -865,7 +903,7 @@ export function applySingleTick(state: ColonyState): ColonyState {
   const newlyArrivedColonists: Colonist[] = [];
 
   let updatedRovers: Rover[] = state.rovers.map((r) => {
-    let rover = { ...r };
+    let rover = { ...r, destination: normalizeRoverDestination(r.destination) };
 
     if (rover.state === 'idle_at_base') {
       rover.power = Math.min(rSpecs.powerMax, rover.power + rSpecs.rechargeRatePerTick);
@@ -874,7 +912,8 @@ export function applySingleTick(state: ColonyState): ColonyState {
 
     rover.power = Math.max(0, rover.power - rSpecs.powerDrainPerTick);
 
-    if (rover.power === 0) {
+    if (rover.power <= 0) {
+      rover.power = 0;
       rover.state = 'stranded';
       rover.cargo = null;
       rover.destination = null;
@@ -883,6 +922,7 @@ export function applySingleTick(state: ColonyState): ColonyState {
     }
 
     if (rover.state === 'traveling_out' || rover.state === 'traveling_back') {
+      ensureRoverRoute(rover);
       const stepsToTake = Math.min(rSpecs.speedTilesPerTick, rover.route.length);
       for (let s = 0; s < stepsToTake; s++) {
         if (rover.route.length > 0) {
@@ -892,9 +932,16 @@ export function applySingleTick(state: ColonyState): ColonyState {
         }
       }
 
+      const goal = roverTravelGoal(rover);
+      if (goal && rover.x === goal.x && rover.y === goal.y) {
+        rover.route = [];
+      }
+
       if (rover.state === 'traveling_out' && rover.destination && rover.x === rover.destination.x && rover.y === rover.destination.y) {
         rover.state = 'on_site';
-        rover.onSiteTicksRemaining = rover.destination.onSiteTicksTotal;
+        rover.onSiteTicksRemaining = Number.isFinite(rover.destination.onSiteTicksTotal)
+          ? rover.destination.onSiteTicksTotal
+          : rSpecs.landingZoneLoadTicks;
       }
 
       if (rover.state === 'traveling_back' && rover.x === rover.garageX && rover.y === rover.garageY) {
@@ -927,7 +974,15 @@ export function applySingleTick(state: ColonyState): ColonyState {
       return rover;
     }
 
-    if (rover.state === 'on_site' && rover.destination) {
+    if (rover.state === 'on_site') {
+      if (!rover.destination) {
+        rover.state = 'traveling_back';
+        ensureRoverRoute(rover);
+        return rover;
+      }
+      if (!Number.isFinite(rover.onSiteTicksRemaining)) {
+        rover.onSiteTicksRemaining = rover.destination.onSiteTicksTotal ?? rSpecs.landingZoneLoadTicks;
+      }
       rover.onSiteTicksRemaining -= 1;
       if (rover.onSiteTicksRemaining <= 0) {
         if (rover.destination.type === 'landing_zone') {
@@ -955,9 +1010,9 @@ export function applySingleTick(state: ColonyState): ColonyState {
           rover.occupants = 1;
         }
 
-        const returnGoal = [{ x: rover.garageX, y: rover.garageY }];
-        rover.route = findShortestRoute({ x: rover.x, y: rover.y }, returnGoal, new Set(), 20);
         rover.state = 'traveling_back';
+        rover.route = [];
+        ensureRoverRoute(rover);
       }
       return rover;
     }
@@ -1483,7 +1538,12 @@ export async function executeAuthoritativeTick(
     power: r.power,
     cargo: r.cargo,
     destination: r.destination,
-    onSiteTicksRemaining: 0,
+    onSiteTicksRemaining:
+      typeof r.destination?.onSiteTicksRemaining === 'number'
+        ? r.destination.onSiteTicksRemaining
+        : r.state === 'on_site'
+          ? (r.destination?.onSiteTicksTotal ?? CONTRACT_RULES.rovers.landingZoneLoadTicks)
+          : 0,
     route: r.route || [],
   }));
 
@@ -1767,9 +1827,11 @@ export async function executeAuthoritativeTick(
               x: r.x,
               y: r.y,
               state: r.state,
-              power: r.power,
+              power: Math.round(r.power),
               cargo: r.cargo,
-              destination: r.destination,
+              destination: r.destination
+                ? { ...r.destination, onSiteTicksRemaining: r.onSiteTicksRemaining }
+                : null,
               route: r.route || [],
             })
             .eq('id', r.id)
@@ -1785,9 +1847,11 @@ export async function executeAuthoritativeTick(
           x: r.x,
           y: r.y,
           state: r.state,
-          power: r.power,
+          power: Math.round(r.power),
           cargo: r.cargo,
-          destination: r.destination,
+          destination: r.destination
+            ? { ...r.destination, onSiteTicksRemaining: r.onSiteTicksRemaining }
+            : null,
           route: r.route || [],
         }));
         await client.from('marscolony_rovers').insert(rovRows);

@@ -304,7 +304,12 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
   const scrubbers = countType(state, 'scrubber');
   const solars = countType(state, 'solar');
 
-  const escortsEnRoute = state.rovers.filter((r) => r.destination?.type === 'landing_zone').length;
+  const escortsEnRoute = state.rovers.filter(
+    (r) =>
+      r.destination?.type === 'landing_zone' ||
+      r.cargo?.type === 'arrival' ||
+      ((r.state === 'traveling_out' || r.state === 'on_site') && r.x === 0 && r.y === 0)
+  ).length;
   if (state.pendingArrivals.length > escortsEnRoute && idleRover) {
     if (cellCount === 0 && hasRefinery && state.ore >= CONTRACT_RULES.refinery.oreCostPerCell) {
       return { type: 'REFINE_CELL' };

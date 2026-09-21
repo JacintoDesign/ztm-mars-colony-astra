@@ -140,7 +140,12 @@ export async function executeAuthoritativeTick(
     power: r.power,
     cargo: r.cargo,
     destination: r.destination,
-    onSiteTicksRemaining: 0,
+    onSiteTicksRemaining:
+      typeof r.destination?.onSiteTicksRemaining === 'number'
+        ? r.destination.onSiteTicksRemaining
+        : r.state === 'on_site'
+          ? (r.destination?.onSiteTicksTotal ?? CONTRACT_RULES.rovers.landingZoneLoadTicks)
+          : 0,
     route: r.route || [],
   }));
   if (rovers.length > maxRoversAllowed) {
@@ -434,9 +439,11 @@ export async function executeAuthoritativeTick(
               x: r.x,
               y: r.y,
               state: r.state,
-              power: r.power,
+              power: Math.round(r.power),
               cargo: r.cargo,
-              destination: r.destination,
+              destination: r.destination
+                ? { ...r.destination, onSiteTicksRemaining: r.onSiteTicksRemaining }
+                : null,
               route: r.route || [],
             })
             .eq('id', r.id)
@@ -452,9 +459,11 @@ export async function executeAuthoritativeTick(
           x: r.x,
           y: r.y,
           state: r.state,
-          power: r.power,
+          power: Math.round(r.power),
           cargo: r.cargo,
-          destination: r.destination,
+          destination: r.destination
+            ? { ...r.destination, onSiteTicksRemaining: r.onSiteTicksRemaining }
+            : null,
           route: r.route || [],
         }));
         await client.from('marscolony_rovers').insert(rovRows);
