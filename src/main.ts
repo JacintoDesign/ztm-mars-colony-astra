@@ -272,7 +272,6 @@ let serverSyncTimeout: number | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 let lastAutopilotTick = -1;
 let lastPersistCheckpoint = 0;
-let persistInFlight = false;
 let tickSyncChain: Promise<void> = Promise.resolve();
 
 function enqueueTickSync(work: () => Promise<void>): Promise<void> {
@@ -310,7 +309,11 @@ function persistTickOptions(): { speed: number; maxTicks: number; projectedTick:
   if (activeColonyId) {
     colonyService.rememberProjectedTick(activeColonyId, projectedTick);
   }
-  return { speed, maxTicks: Math.max(8, speed * 8), projectedTick };
+  return {
+    speed,
+    maxTicks: Math.max(CONTRACT_RULES.persistCheckpointTicks, speed * 8),
+    projectedTick,
+  };
 }
 
 function reconcileAuthoritativeData(
@@ -376,7 +379,10 @@ function maybeRunAutopilot(): void {
   if (state.status !== 'active') return;
   if (lastAutopilotTick > state.tick) lastAutopilotTick = -1;
   const urgent = state.food < 20 || state.oxygen < 20 || state.power < 15;
-  if (!urgent && state.tick - lastAutopilotTick < 3) return;
+  const needSecondHabitat =
+    state.buildings.filter((b) => b.type === 'habitat').length < 2 &&
+    state.tick < CONTRACT_RULES.arrivals.intervalTicks;
+  if (!urgent && !needSecondHabitat && state.tick - lastAutopilotTick < 3) return;
   const action = nextAutopilotAction(state);
   if (!action) return;
   lastAutopilotTick = state.tick;
@@ -496,7 +502,6 @@ function startSimulationLoops(userId: string): void {
       maybeRunAutopilot();
       const checkpoint = CONTRACT_RULES.persistCheckpointTicks;
       if (tick > 0 && Math.floor(tick / checkpoint) > Math.floor(lastPersistCheckpoint / checkpoint)) {
-        lastPersistCheckpoint = tick;
         void runAuthoritativeSync(userId);
       }
     } else {
@@ -513,29 +518,23 @@ function startSimulationLoops(userId: string): void {
 }
 
 async function runAuthoritativeSync(userId: string): Promise<void> {
-  if (persistInFlight) return;
-  persistInFlight = true;
-  try {
-    await enqueueTickSync(async () => {
-      if (isUiPaused() || document.hidden) return;
-      if (store.getState().status !== 'active') {
-        stopSimulationLoops();
-        return;
+  await enqueueTickSync(async () => {
+    if (isUiPaused() || document.hidden) return;
+    if (store.getState().status !== 'active') {
+      stopSimulationLoops();
+      return;
+    }
+    if (activeColonyId && activeUserId === userId) {
+      try {
+        const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, persistTickOptions());
+        reconcileAuthoritativeData(updatedData);
+        lastPersistCheckpoint = Math.max(lastPersistCheckpoint, updatedData.colony.tick ?? 0);
+        maybeRunAutopilot();
+      } catch (err) {
+        console.warn('Authoritative periodic server tick sync failed:', err);
       }
-      if (activeColonyId && activeUserId === userId) {
-        try {
-          const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, persistTickOptions());
-          reconcileAuthoritativeData(updatedData);
-          lastPersistCheckpoint = Math.max(lastPersistCheckpoint, updatedData.colony.tick ?? 0);
-          maybeRunAutopilot();
-        } catch (err) {
-          console.warn('Authoritative periodic server tick sync failed:', err);
-        }
-      }
-    });
-  } finally {
-    persistInFlight = false;
-  }
+    }
+  });
 }
 
 function stopSimulationLoops(): void {
@@ -586,17 +585,12 @@ document.addEventListener('visibilitychange', async () => {
 
   if (document.hidden) {
     stopSimulationLoops();
-    const freezeOnly = !gameSettings.getState().alwaysPassTime;
-    colonyService.flushTicksKeepalive(
-      activeColonyId,
-      freezeOnly ? { skipCatchUp: true } : persistTickOptions()
-    );
+    colonyService.flushTicksKeepalive(activeColonyId, persistTickOptions());
     await enqueueTickSync(async () => {
       try {
-        if (freezeOnly) {
+        await flushAuthoritativeTicks();
+        if (!gameSettings.getState().alwaysPassTime) {
           await freezeTickClock();
-        } else {
-          await flushAuthoritativeTicks();
         }
       } catch (err) {
         console.warn('Failed to flush ticks while hidden:', err);
@@ -629,18 +623,12 @@ document.addEventListener('visibilitychange', async () => {
 
 window.addEventListener('pagehide', () => {
   if (!activeColonyId || store.getState().status !== 'active') return;
-  colonyService.flushTicksKeepalive(
-    activeColonyId,
-    gameSettings.getState().alwaysPassTime ? persistTickOptions() : { skipCatchUp: true }
-  );
+  colonyService.flushTicksKeepalive(activeColonyId, persistTickOptions());
 });
 
 window.addEventListener('freeze', () => {
   if (!activeColonyId || store.getState().status !== 'active') return;
-  colonyService.flushTicksKeepalive(
-    activeColonyId,
-    gameSettings.getState().alwaysPassTime ? persistTickOptions() : { skipCatchUp: true }
-  );
+  colonyService.flushTicksKeepalive(activeColonyId, persistTickOptions());
 });
 
 async function handleAuthStateChange(authState: AuthState): Promise<void> {

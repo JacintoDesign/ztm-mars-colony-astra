@@ -1367,6 +1367,24 @@ export function applyTicks(state: ColonyState, nTicks: number): ColonyState {
   return current;
 }
 
+export function applyLivingTicks(state: ColonyState, nTicks: number): ColonyState {
+  if (nTicks <= 0 || state.status === 'game_over') {
+    return state;
+  }
+
+  let current = state;
+  let lastAlive = state;
+  for (let i = 0; i < nTicks; i++) {
+    current = applySingleTick(current);
+    if (current.status === 'game_over') {
+      return lastAlive;
+    }
+    lastAlive = current;
+  }
+
+  return current;
+}
+
 export async function executeAuthoritativeTick(
   client: any,
   colonyId: string,
@@ -1578,35 +1596,24 @@ export async function executeAuthoritativeTick(
       lastAppliedTick: colony.last_tick_at,
     };
 
-    const nextStateCandidate = applyTicks(currentState, ticksToApply);
-    let nextState = nextStateCandidate;
-
-    if (nextState.status === 'game_over') {
-      if (colonists.length === 0) {
-        return {
-          colony,
-          buildings,
-          colonists,
-          rovers,
-          oreDeposits,
-          bestSolsSurvived,
-        };
-      }
-      const elapsedState = fromElapsed > 0 ? applyTicks(currentState, fromElapsed) : currentState;
-      if (elapsedState.status !== 'game_over') {
-        if (fromElapsed <= 0) {
-          return {
-            colony,
-            buildings,
-            colonists,
-            rovers,
-            oreDeposits,
-            bestSolsSurvived,
-          };
-        }
-        nextState = elapsedState;
-      }
+    const elapsedState = fromElapsed > 0 ? applyTicks(currentState, fromElapsed) : currentState;
+    if (colonists.length === 0 && elapsedState.status === 'game_over') {
+      return {
+        colony,
+        buildings,
+        colonists,
+        rovers,
+        oreDeposits,
+        bestSolsSurvived,
+      };
     }
+    const projectedState = applyLivingTicks(currentState, ticksToApply);
+    const nextState =
+      elapsedState.status === 'game_over'
+        ? elapsedState
+        : projectedState.tick >= elapsedState.tick
+          ? projectedState
+          : elapsedState;
 
     const newLastTickAt = new Date().toISOString();
 

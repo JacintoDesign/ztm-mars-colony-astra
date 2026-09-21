@@ -9,7 +9,7 @@ import {
   SimulationAction,
   BUILDING_COSTS,
 } from '../simulation/types';
-import { applyTicks } from '../simulation/tick';
+import { applyLivingTicks, applyTicks } from '../simulation/tick';
 import { CONTRACT_RULES, countsTowardWorkforceCap } from '../simulation/contract-rules';
 import { buildingFromRow, buildingPersistFields, persistableDestinationType } from '../simulation/persist-buildings';
 import { SeededPRNG, generateInitialSeed } from '../simulation/prng';
@@ -258,35 +258,24 @@ export async function executeAuthoritativeTick(
       lastAppliedTick: colony.last_tick_at,
     };
 
-    const nextStateCandidate = applyTicks(currentState, ticksToApply);
-    let nextState = nextStateCandidate;
-
-    if (nextState.status === 'game_over') {
-      if (colonists.length === 0) {
-        return {
-          colony,
-          buildings,
-          colonists,
-          rovers,
-          oreDeposits,
-          bestSolsSurvived,
-        };
-      }
-      const elapsedState = fromElapsed > 0 ? applyTicks(currentState, fromElapsed) : currentState;
-      if (elapsedState.status !== 'game_over') {
-        if (fromElapsed <= 0) {
-          return {
-            colony,
-            buildings,
-            colonists,
-            rovers,
-            oreDeposits,
-            bestSolsSurvived,
-          };
-        }
-        nextState = elapsedState;
-      }
+    const elapsedState = fromElapsed > 0 ? applyTicks(currentState, fromElapsed) : currentState;
+    if (colonists.length === 0 && elapsedState.status === 'game_over') {
+      return {
+        colony,
+        buildings,
+        colonists,
+        rovers,
+        oreDeposits,
+        bestSolsSurvived,
+      };
     }
+    const projectedState = applyLivingTicks(currentState, ticksToApply);
+    const nextState =
+      elapsedState.status === 'game_over'
+        ? elapsedState
+        : projectedState.tick >= elapsedState.tick
+          ? projectedState
+          : elapsedState;
 
     // 8. Authoritative Database Writes
     const newLastTickAt = new Date().toISOString();

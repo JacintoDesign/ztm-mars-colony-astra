@@ -742,3 +742,22 @@ export function applyTicks(state: ColonyState, nTicks: number): ColonyState {
 
   return current;
 }
+
+/** Catch-up helper: advance as far as nTicks without persisting a game_over that the live colony has not reached. */
+export function applyLivingTicks(state: ColonyState, nTicks: number): ColonyState {
+  if (nTicks <= 0 || state.status === 'game_over') {
+    return state;
+  }
+
+  let current = state;
+  let lastAlive = state;
+  for (let i = 0; i < nTicks; i++) {
+    current = applySingleTick(current);
+    if (current.status === 'game_over') {
+      return lastAlive;
+    }
+    lastAlive = current;
+  }
+
+  return current;
+}

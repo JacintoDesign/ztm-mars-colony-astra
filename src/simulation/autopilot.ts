@@ -328,6 +328,11 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
     if (farm) return farm;
   }
 
+  if (habitats < 2 && constructingOf(state, 'habitat') === 0) {
+    const habitat = trySolarThen(state, 'habitat', true);
+    if (habitat) return habitat;
+  }
+
   if (solars < 2 && constructingOf(state, 'solar') === 0) {
     const solar = tryPlace(state, 'solar', { nearWorkers: true });
     if (solar) return solar;
