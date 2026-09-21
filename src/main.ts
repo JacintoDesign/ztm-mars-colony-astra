@@ -16,6 +16,7 @@ import { BuildingInspector } from './ui/building-inspector';
 import { MissionAdvisor } from './ui/mission-advisor';
 import { authManager, AuthState } from './services/auth-manager';
 import { colonyService } from './services/colony-service';
+import type { ColonyData } from './services/colony-service';
 import { CONTRACT_RULES } from './simulation/contract-rules';
 import type { SimulationAction } from './simulation/types';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -312,6 +313,25 @@ function persistTickOptions(): { speed: number; maxTicks: number; projectedTick:
   return { speed, maxTicks: Math.max(8, speed * 8), projectedTick };
 }
 
+function reconcileAuthoritativeData(
+  data: ColonyData,
+  options?: { allowRestart?: boolean }
+): void {
+  const projectedTickAtResponse = store.getState().tick;
+  store.loadColonyData(data, activeUserDisplay, {
+    authoritative: true,
+    allowRestart: options?.allowRestart,
+  });
+
+  if (data.colony.status !== 'active' || options?.allowRestart) return;
+
+  const authoritativeTick = data.colony.tick ?? 0;
+  const projectedTicksInFlight = Math.max(0, projectedTickAtResponse - authoritativeTick);
+  if (projectedTicksInFlight > 0 && store.getState().status === 'active') {
+    store.advanceTicks(projectedTicksInFlight);
+  }
+}
+
 async function executeAndReconcileAction(
   action: SimulationAction
 ): Promise<{ success: boolean; reason?: string }> {
@@ -328,8 +348,7 @@ async function executeAndReconcileAction(
       action,
       persistTickOptions()
     );
-    store.loadColonyData(response.colonyData, activeUserDisplay, {
-      authoritative: true,
+    reconcileAuthoritativeData(response.colonyData, {
       allowRestart: action.type === 'RESTART_COLONY',
     });
     result = { success: response.success, reason: response.reason };
@@ -342,7 +361,7 @@ async function flushAuthoritativeTicks(): Promise<void> {
   if (!activeColonyId || !activeUserId) return;
   if (store.getState().status !== 'active') return;
   const updatedData = await colonyService.triggerServerTick(activeColonyId, activeUserId, persistTickOptions());
-  store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+  reconcileAuthoritativeData(updatedData);
 }
 
 async function freezeTickClock(): Promise<void> {
@@ -506,7 +525,7 @@ async function runAuthoritativeSync(userId: string): Promise<void> {
       if (activeColonyId && activeUserId === userId) {
         try {
           const updatedData = await colonyService.triggerServerTick(activeColonyId, userId, persistTickOptions());
-          store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+          reconcileAuthoritativeData(updatedData);
           lastPersistCheckpoint = Math.max(lastPersistCheckpoint, updatedData.colony.tick ?? 0);
           maybeRunAutopilot();
         } catch (err) {
@@ -545,7 +564,7 @@ window.addEventListener('online', async () => {
           ? { skipCatchUp: true }
           : persistTickOptions()
       );
-      store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+      reconcileAuthoritativeData(updatedData);
       telemetryBanner.setState('hidden');
       toolbar.setActionsPaused(false);
       if (isUiPaused()) applySessionStatus();
@@ -594,7 +613,7 @@ document.addEventListener('visibilitychange', async () => {
           speed: 1,
           maxTicks: 8,
         });
-        store.loadColonyData(updatedData, activeUserDisplay, { authoritative: true });
+        reconcileAuthoritativeData(updatedData);
       } else if (activeColonyId && activeUserId) {
         await freezeTickClock();
       }
