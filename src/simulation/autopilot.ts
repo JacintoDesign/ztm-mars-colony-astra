@@ -323,12 +323,22 @@ export function nextAutopilotAction(state: ColonyState): SimulationAction | null
 
   if (!sitesOpen) return null;
 
-  if (farms === 0) {
-    const farm = tryPlace(state, 'farm', { nearWorkers: true });
+  if (farms < 2 && constructingOf(state, 'farm') === 0) {
+    const farm = trySolarThen(state, 'farm', true);
     if (farm) return farm;
   }
 
-  if (habitats < 2 && constructingOf(state, 'habitat') === 0) {
+  if (scrubbers < 2 && constructingOf(state, 'scrubber') === 0) {
+    const scrubber = trySolarThen(state, 'scrubber', true);
+    if (scrubber) return scrubber;
+  }
+
+  if (
+    habitats < 2 &&
+    farms >= 2 &&
+    scrubbers >= 2 &&
+    constructingOf(state, 'habitat') === 0
+  ) {
     const habitat = trySolarThen(state, 'habitat', true);
     if (habitat) return habitat;
   }
