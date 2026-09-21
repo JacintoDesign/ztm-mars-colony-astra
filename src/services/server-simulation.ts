@@ -35,6 +35,25 @@ export interface AuthoritativeTickOptions {
   projectedTick?: number;
 }
 
+function persistColonyTickFields(nextState: ColonyState, lastTickAt: string) {
+  return {
+    oxygen: Math.round(nextState.oxygen),
+    power: Math.round(nextState.power),
+    food: Math.round(nextState.food),
+    ore: Math.round(nextState.ore),
+    electronics: Math.round(nextState.electronics),
+    seed: Math.trunc(nextState.seed),
+    battery_cells: nextState.batteryCells,
+    mining_sites: nextState.miningSites,
+    active_asteroid: nextState.activeAsteroid,
+    pending_arrivals: nextState.pendingArrivals,
+    tick: Math.trunc(nextState.tick),
+    status: nextState.status,
+    last_tick_at: lastTickAt,
+    updated_at: lastTickAt,
+  };
+}
+
 export async function executeAuthoritativeTick(
   client: SupabaseClient,
   colonyId: string,
@@ -267,30 +286,15 @@ export async function executeAuthoritativeTick(
     const newLastTickAt = new Date().toISOString();
 
     // 8a. Update colony record
-    const { data: persistedRows } = await client
+    const { data: persistedRows, error: persistError } = await client
       .from('marscolony_colonies')
-      .update({
-        oxygen: nextState.oxygen,
-        power: nextState.power,
-        food: nextState.food,
-        ore: nextState.ore,
-        electronics: nextState.electronics,
-        seed: nextState.seed,
-        battery_cells: nextState.batteryCells,
-        mining_sites: nextState.miningSites,
-        active_asteroid: nextState.activeAsteroid,
-        pending_arrivals: nextState.pendingArrivals,
-        tick: nextState.tick,
-        status: nextState.status,
-        last_tick_at: newLastTickAt,
-        updated_at: newLastTickAt,
-      })
+      .update(persistColonyTickFields(nextState, newLastTickAt))
       .eq('id', colonyId)
       .eq('owner', userId)
       .eq('tick', colony.tick)
       .select('tick');
 
-    if (!persistedRows || persistedRows.length === 0) {
+    if (persistError || !persistedRows || persistedRows.length === 0) {
       return {
         colony,
         buildings,

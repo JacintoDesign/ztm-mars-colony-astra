@@ -363,22 +363,12 @@ async function executeAndReconcileAction(
 async function flushAuthoritativeTicks(): Promise<void> {
   if (!activeColonyId || !activeUserId) return;
   if (store.getState().status !== 'active') return;
-  const checkpoint = CONTRACT_RULES.persistCheckpointTicks;
-  for (let i = 0; i < 25; i++) {
-    const projectedTick = store.getState().tick;
-    const updatedData = await colonyService.triggerServerTick(
-      activeColonyId,
-      activeUserId,
-      {
-        ...persistTickOptions(),
-        projectedTick,
-        maxTicks: Math.max(checkpoint, projectedTick),
-      }
-    );
-    reconcileAuthoritativeData(updatedData);
-    const dbTick = updatedData.colony.tick ?? 0;
-    if (updatedData.colony.status !== 'active' || dbTick >= projectedTick) break;
-  }
+  const updatedData = await colonyService.triggerServerTick(
+    activeColonyId,
+    activeUserId,
+    persistTickOptions()
+  );
+  reconcileAuthoritativeData(updatedData);
 }
 
 async function freezeTickClock(): Promise<void> {

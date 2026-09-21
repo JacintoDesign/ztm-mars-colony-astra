@@ -105,39 +105,6 @@ export class ColonyService {
   }
 
   /**
-   * Runs authoritative tick sync until DB matches remembered HUD projection (batched by maxTicks).
-   * skipCatchUp only suppresses wall-clock elapsed catch-up, not projection persistence.
-   */
-  private async syncAuthoritativeState(
-    colonyId: string,
-    userId: string,
-    options?: AuthoritativeTickOptions
-  ): Promise<ColonyData> {
-    const checkpoint = CONTRACT_RULES.persistCheckpointTicks;
-    const merged = this.withProjectedTick(colonyId, {
-      ...options,
-      maxTicks: options?.maxTicks ?? checkpoint,
-    });
-    let data = await this.triggerServerTick(colonyId, userId, merged);
-
-    for (let i = 0; i < 30; i++) {
-      const dbTick = data.colony.tick ?? 0;
-      const remembered = this.readRememberedProjectedTick(colonyId);
-      const target = Math.max(dbTick, remembered ?? dbTick, merged.projectedTick ?? dbTick);
-      const gap = target - dbTick;
-      if (gap <= 0 || data.colony.status !== 'active') break;
-
-      data = await this.triggerServerTick(colonyId, userId, {
-        ...merged,
-        projectedTick: target,
-        maxTicks: Math.min(CONTRACT_RULES.maxCatchUpTicks, Math.max(checkpoint, gap)),
-      });
-    }
-
-    return data;
-  }
-
-  /**
    * Loads an existing colony for the authenticated user, or creates one if it's the first sign-in.
    * Performs authoritative server-side catch-up (capped at 28,800 ticks).
    */
@@ -189,9 +156,11 @@ export class ColonyService {
     }
 
     let colonyId: string;
+    let dbTick = 0;
 
     if (existingColonies && existingColonies.length > 0) {
       colonyId = existingColonies[0].id;
+      dbTick = existingColonies[0].tick ?? 0;
     } else {
       // First sign-in: generate fresh seed and 500-ore distribution
       const initialSeed = generateInitialSeed();
@@ -323,10 +292,16 @@ export class ColonyService {
       await supabase.from('marscolony_colonists').insert(starterColonistRows);
     }
 
-    // 3. Authoritative server tick execution on load (catch-up calculation and state persistence)
-    return await this.syncAuthoritativeState(colonyId, userId, {
+    // 3. One authoritative persist on load (no retry loop — failed saves must not block first paint)
+    const remembered = this.readRememberedProjectedTick(colonyId) ?? tickOptions?.projectedTick;
+    const gap = remembered != null ? Math.max(0, Math.floor(remembered) - dbTick) : 0;
+    return await this.triggerServerTick(colonyId, userId, {
       ...tickOptions,
-      maxTicks: tickOptions?.maxTicks ?? CONTRACT_RULES.persistCheckpointTicks,
+      projectedTick: remembered,
+      maxTicks: Math.min(
+        200,
+        Math.max(CONTRACT_RULES.persistCheckpointTicks, gap, tickOptions?.maxTicks ?? 0)
+      ),
     });
   }
 
