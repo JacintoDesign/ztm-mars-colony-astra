@@ -380,7 +380,7 @@ export class BuildingInspector {
             </button>
 
             <button type="button" class="inspector-btn inspector-btn-demolish" id="inspector-demolish" ${state.power < 10 ? 'disabled' : ''}>
-              <span class="btn-icon">💥</span> DEMOLISH
+              <span class="btn-icon">💥</span> DEMOLISH (10 PWR)
               <span class="btn-shortcut">[D]</span>
             </button>
           </div>
